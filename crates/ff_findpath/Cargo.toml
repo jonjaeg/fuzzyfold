@@ -1,0 +1,24 @@
+[package]
+name = "ff_findpath"
+version = "0.1.0"
+description = "fuzzyfold's findpath algorithm for energy barrier estimation."
+documentation = "https://docs.rs/ff_findpath"
+keywords = ["dna", "rna", "secondary-structure", "findpath-algorithm", "nearest-neighbor"]
+readme = "../../README.md"
+
+
+
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+categories.workspace = true
+
+
+[dependencies]
+ff_structure.workspace = true
+ff_energy.workspace = true
+
+
+
+[badges]
+maintenance = { status = "actively-developed" }

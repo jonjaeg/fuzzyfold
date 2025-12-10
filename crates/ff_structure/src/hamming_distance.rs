@@ -34,8 +34,13 @@ mod tests {
         // try different alphabet, not just assuming RNA letters
         let c: &'static str = "ACUGYUHU";
         let d: &'static str = "xxUGYUH1";
-        assert_eq!(hamming_distance(c, d),3)
+        assert_eq!(hamming_distance(c, d),3);
 
+
+        // try hamming distance of two RNA secondary structures in dot-bracket notation
+        let a2: &'static str = ".((.....))..";
+        let b2: &'static str = "..(((...))).";
+        assert_eq!(hamming_distance(a2, b2),5) 
 
 
 

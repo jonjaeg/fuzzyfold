@@ -8,8 +8,8 @@
 //! This crate re-exports the main functionality from its submodules.
 
 
-/// Exposing ff_structure as fuzz/* yfold::structure. A collection of practical data structures for
-/// RNA structure representati */ons. 
+/// Exposing ff_structure as fuzzyfold::structure. A collection of practical data structures for
+/// RNA structure representations. 
 pub mod structure {
     pub use ::ff_structure::*;
 }
