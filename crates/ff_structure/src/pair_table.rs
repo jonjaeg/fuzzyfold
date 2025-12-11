@@ -2,6 +2,9 @@ use std::ops::{Deref, DerefMut};
 use std::convert::TryFrom;
 use crate::StructureError;
 use crate::{DotBracket, DotBracketVec};
+use std::fmt;
+
+
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PairTable(pub Vec<Option<usize>>);
@@ -92,6 +95,24 @@ impl TryFrom<&DotBracketVec> for PairTable {
     }
 }
 
+impl fmt::Display for PairTable {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Example format: "[-, 3, 2, -]" for a 4-nt structure
+        write!(f, "[")?;
+        for (i, partner) in self.0.iter().enumerate() {
+            // after each element except the first, print a comma AND a whitespace
+            if i > 0 {
+                write!(f, ", ")?;
+            }
+            match partner {
+                Some(j) => write!(f, "{j}")?,
+                None => write!(f, "-")?,
+            }
+        }
+        write!(f, "]")
+    }
+}
+
 
 #[cfg(test)]
 mod tests {
@@ -158,6 +179,13 @@ mod tests {
     fn test_well_formed_out_of_bounds_assert() {
         let pt = PairTable::try_from("..").unwrap();
         pt.is_well_formed(0, 3); // j = pt.len(), should panic
+    }
+
+    #[test]
+    fn test_display_pair_table() {
+        let pt = PairTable::try_from("(.())").unwrap();
+        let display = format!("{}", pt);
+        assert_eq!(display, "[4, -, 3, 2, 0]"); // after each comma there is a whitespace!
     }
 }
 
