@@ -50,7 +50,7 @@ pub fn load_test_file(path: &str) -> Result<(String, String, String), io::Error>
 
 fn main()  -> Result<(), Box<dyn std::error::Error>> {
     // Example usage of load_test_file
-    let test_file_path = "../../test_data/large.txt";
+    let test_file_path = "../../test_data/short.txt";
 
     // call the sequence, structures from the test file
     let (seq, struct1, struct2) = load_test_file(test_file_path)?; // These are Strings

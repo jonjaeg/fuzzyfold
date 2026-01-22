@@ -1,9 +1,6 @@
-
-use std::hash::{Hash, Hasher};
-use std::collections::hash_map::DefaultHasher;
 use std::fmt;
 use ff_energy::{NucleotideVec, ViennaRNA, EnergyModel}; 
-use ff_structure::PairTable;
+use ff_structure::{DotBracketVec, PairTable};
 
 /// Move represent the insertion or deletion of a base pair (i, j) between two structures. 
 /// If is_insertion is true, it represents the insertion of the base pair (i, j) into the structure.
@@ -54,14 +51,14 @@ impl fmt::Display for StructureDifference {
     }
 }
 
-pub struct Intermediate {
-    pub pt: PairTable,
-    pub saddle_energy: f64,
-    pub current_energy: f64,
-    // We track which moves from the global list are still valid
-    pub remaining_moves: Vec<Move>,
+#[derive(Clone, Debug)]
+struct Intermediate {
+    pt: PairTable,
+    saddle_energy: f64,
+    current_energy: f64,
+    remaining_moves: Vec<Move>, // Moves available to be taken
+    path: Vec<Move>,            // Sequence of moves taken so far
 }
-
 
 
 /// compare_structures returns the ElemenrtaryMoves required to transform pt1 into pt2.
@@ -214,9 +211,13 @@ pub fn analyze_folding_path(
         energy: start_energy,
         step_index: 0,
     });
+    // print sequence
+    println!("{}", sequence);
+    // print starting structure and energy
+    println!("{} \t\t {}", s1, start_energy);
 
     for (idx, m) in moves.iter().enumerate() {
-        println!("Applying move: {}", m);
+        //println!("Applying move: {}", m);
         //println!("Current structure before move: {:?}", current_pt);
         // Apply move
         if m.is_insertion {
@@ -226,12 +227,16 @@ pub fn analyze_folding_path(
             current_pt[m.i] = None;
             current_pt[m.j] = None;
         }
-        println!("Current structure after move: {}", current_pt);
+        //println!("Current PairTable after move: {}", current_pt);
+        // print current DotBracket representation
+        //println!("{}", DotBracketVec::try_from(&current_pt).unwrap());
         
 
         // Fast energy check using existing model/vec
         let energy = model.energy_of_structure(&seq_vec, &current_pt) as f64 / 100.0;
-        println!("Current energy: {}", energy);
+        //println!("Current energy: {}", energy);
+        println!("{} \t {} \t {}", DotBracketVec::try_from(&current_pt).unwrap(), m, energy);
+
         if energy > current_max_energy {
             current_max_energy = energy;
         }
@@ -247,6 +252,10 @@ pub fn analyze_folding_path(
     }
 
     let end_energy = steps.last().map(|s| s.energy).unwrap_or(start_energy);
+
+    // print final structure and energy
+    //let last_dot_bracket_structure = DotBracketVec::try_from(&current_pt).unwrap();
+    //println!("{} \t\t{}",&last_dot_bracket_structure , end_energy);
 
     let stats = PathStats {
         saddle_energy: current_max_energy,
