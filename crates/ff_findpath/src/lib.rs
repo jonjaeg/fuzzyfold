@@ -1,5 +1,5 @@
 // import everything from greedy.rs into lib.rs
-use greedy::*;
+pub use greedy::*;
 pub use utils::*;
 
 
