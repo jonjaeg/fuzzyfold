@@ -17,6 +17,7 @@ categories.workspace = true
 [dependencies]
 ff_structure.workspace = true
 ff_energy.workspace = true
+clap = { version = "4.5.56", features = ["derive"] }
 
 
 

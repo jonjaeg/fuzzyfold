@@ -1,12 +1,24 @@
-use ff_findpath::utils::{prepare_moves, analyze_folding_path};
-use ff_structure::PairTable;
-use ff_energy::NucleotideVec;
-use ff_energy::EnergyModel;
+//use ff_findpath::utils::{prepare_moves, analyze_folding_path};
+use ff_findpath::greedy::{greedy_find_path};
 use ff_energy::ViennaRNA;
 
 use std::fs;
 use std::path::Path;
 use std::io;
+
+use clap::Parser;
+
+
+
+/// Simple CLI for getting the input Path
+#[derive(Parser, Debug)]
+#[command(version, about, long_about = None)]
+struct Args {
+    /// Name of file containing test data
+    #[arg(short, long)]
+    filename: String,
+
+}
 
 /// Reads sequence and structures from a three-line test file.
 /// Returns a tuple (sequence, s1, s2) on success.
@@ -50,24 +62,28 @@ pub fn load_test_file(path: &str) -> Result<(String, String, String), io::Error>
 
 fn main()  -> Result<(), Box<dyn std::error::Error>> {
     // Example usage of load_test_file
-    let test_file_path = "../../test_data/short.txt";
+
+    let args = Args::parse();
+    let test_file_path = args.filename;
 
     // call the sequence, structures from the test file
-    let (seq, struct1, struct2) = load_test_file(test_file_path)?; // These are Strings
+    let (sequence, struct1, struct2) = load_test_file(&test_file_path)?; // These are Strings
+    let seq: &str = &sequence; // Convert String to &str
     let struct1: &str = &struct1; // Convert String to &str
     let struct2: &str = &struct2;
-    let pt1 = PairTable::try_from(struct1).unwrap(); 
-    let pt2 = PairTable::try_from(struct2).unwrap();
+    //let pt1 = PairTable::try_from(struct1).unwrap(); 
+    //let pt2 = PairTable::try_from(struct2).unwrap();
 
-    let moves = prepare_moves(&pt1, &pt2);
-    let (steps, stats) = analyze_folding_path(&seq, &struct1, &moves);
+    // Initialize Model (This might fail if params aren't found in your env)
+    // Ensure you have valid params or a mock model available.
+    let model = ViennaRNA::default();
 
-    //println!("Test steps:");
-    //    for step in steps {
-    //        println!("{}", step);
-    //    } 
-    println!("Stats: {:?}", stats);
-      
+    let (steps, stats) = greedy_find_path(&model, seq, struct1, struct2).unwrap();
+    println!("Folding Path:");
+    for step in steps {
+        println!("{} \t {} \t {}", step.structure,step.move_applied.unwrap_or_default(), step.energy );
+    } 
+        println!("\nPathStats: {:?}", stats);
     Ok(())
 
 }

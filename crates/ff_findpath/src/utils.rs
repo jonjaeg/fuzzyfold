@@ -10,7 +10,8 @@ use ff_structure::{DotBracketVec, PairTable};
 /// The corresponding PairTable representation would have pt[2] = Some(5) and pt[5] = Some(2).
 /// We define the base pair distance between two structures as the number of moves required to transform one structure into the other.
 /// This means one move corresponds to the change of two indices in the PairTable representation.
-#[derive(Debug, Clone, PartialEq, Eq)]
+// Derive Default, makes default Move { i: 0, j: 0, is_insertion: false } (del (0,0) at start of every path)
+#[derive(Default, Debug, Clone, PartialEq, Eq)]
 pub struct Move {
     pub i: usize,
     pub j: usize,
@@ -52,13 +53,15 @@ impl fmt::Display for StructureDifference {
 }
 
 #[derive(Clone, Debug)]
-struct Intermediate {
-    pt: PairTable,
-    saddle_energy: f64,
-    current_energy: f64,
-    remaining_moves: Vec<Move>, // Moves available to be taken
-    path: Vec<Move>,            // Sequence of moves taken so far
+pub struct Intermediate {
+    pub pt: PairTable,
+    pub saddle_energy: f64,
+    pub current_energy: f64,
+    pub remaining_moves: Vec<Move>, // Moves available to be taken
+    pub path: Vec<Move>,            // Sequence of moves taken so far
 }
+
+
 
 
 /// compare_structures returns the ElemenrtaryMoves required to transform pt1 into pt2.
@@ -358,10 +361,10 @@ mod tests {
 
         let moves = prepare_moves(&pt1, &pt2);
         let (steps, stats) = analyze_folding_path(seq1, struct1, &moves);
-        println!("Test steps:");
-        for step in steps {
-            println!("{}", step);
-        } 
+        //println!("Test steps:");
+        //for step in steps {
+        //    println!("{}", step);
+        //} 
         println!("Stats: {:?}", stats);
     }
 }
