@@ -19,6 +19,12 @@ ff_structure.workspace = true
 ff_energy.workspace = true
 clap = { version = "4.5.56", features = ["derive"] }
 
+criterion.workspace = true
+
+
+[[bench]]
+name = "bench_greedy_functions"
+harness = false
 
 
 [badges]

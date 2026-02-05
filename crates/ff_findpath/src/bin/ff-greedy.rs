@@ -80,10 +80,12 @@ fn main()  -> Result<(), Box<dyn std::error::Error>> {
 
     let (steps, stats) = greedy_find_path(&model, seq, struct1, struct2).unwrap();
     println!("Folding Path:");
+    println!("-----------------");
     for step in steps {
-        println!("{} \t {} \t {}", step.structure,step.move_applied.unwrap_or_default(), step.energy );
-    } 
-        println!("\nPathStats: {:?}", stats);
+        println!("{} \t {} \t {} kcal/mol", step.structure,step.move_applied.unwrap_or_default(), step.energy );
+    }   
+        println!("-----------------");
+        println!("{:?}", stats);
     Ok(())
 
 }

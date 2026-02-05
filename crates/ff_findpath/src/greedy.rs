@@ -2,21 +2,12 @@ use crate::utils::{Move, Intermediate, PathStats, PathStep, compare_structures};
 use ff_energy::{NucleotideVec, ViennaRNA, EnergyModel};
 use ff_structure::{PairTable, LoopTable, LoopInfo, DotBracketVec};
 
-/// A lightweight struct to hold a potential neighbor before we commit to it.
+/// A lightweight struct to hold a potential neighbor of a secondary structure.
 pub struct NeighborCandidate {
     pub pt: PairTable,
     pub applied_move: Move,
     pub original_move_index: usize, // Needed to remove from remaining_moves later
 }
-
-// #[derive(Clone, Debug)]
-// pub struct Intermediate {
-// pub pt: PairTable,
-// pub saddle_energy: f64,
-// pub current_energy: f64,
-// pub remaining_moves: Vec<Move>,
-// pub path: Vec<Move>,
-// }
 
 
 
@@ -76,12 +67,12 @@ pub fn generate_valid_neighbors(
     candidates
 }
 
-/// greedy expand_state performs one expansion step from the given Intermediate state.
+/// greedy apply_move performs one expansion step from the given Intermediate state.
 /// that means it generates all valid neighbors, calculates their energies,
 /// filters them based on max_energy, and constructs new Intermediate states.
 /// Calls the generate_valid_neighbors, calculates energy, filters, and builds Intermediate.
 /// max_energy is an optional threshold to prune high-energy states early. (idea for findpath. with greedy this is not used!)
-pub fn expand_state(
+pub fn apply_move(
     model: &ViennaRNA,
     seq_vec: &NucleotideVec,
     intermediate: &Intermediate,
@@ -95,7 +86,9 @@ pub fn expand_state(
     for cand in candidates {
         // 2. Calculate Energy (Expensive)
         let en = model.energy_of_structure(seq_vec, &cand.pt) as f64 / 100.0;
+        
 
+        // NOT USED IN GREEDY as we always explore all moves and pick the best
         // 3. Filter (Optimization: Drop before cloning paths if eneregy too high)
         if let Some(max) = max_energy {
             if en >= max { continue; }
@@ -124,7 +117,6 @@ pub fn expand_state(
 
 
 /// Finds a folding path from s1 to s2 using a greedy strategy.
-///
 /// At each step, it generates all valid moves that lead toward the target,
 /// evaluates their energy, and picks the one that minimizes the saddle energy 
 /// (and breaks ties with current energy).
@@ -171,7 +163,7 @@ pub fn _greedy_find_path(
         
         // Generate and evaluate neighbors
         // We pass 'None' for max_energy as the Python script passes None in the loop
-        let candidates = expand_state(model, &seq_vec, &current, None);
+        let candidates = apply_move(model, &seq_vec, &current, None);
 
         if candidates.is_empty() {
             return Err("Greedy search got stuck: No valid moves available to progress toward target.".to_string());
@@ -249,7 +241,7 @@ pub fn greedy_find_path(
     for step in 1..=total_steps {
         
         // A. Generate Neighbors
-        let candidates = expand_state(model, &seq_vec, &current, None);
+        let candidates = apply_move(model, &seq_vec, &current, None);
 
         if candidates.is_empty() {
             return Err(format!("Greedy search stuck at step {}: No valid topology neighbors.", step));
@@ -326,7 +318,7 @@ mod tests {
     }
 
     #[test]
-fn test_generate_simple_neighbors_02() {
+fn test_generate_valid_neighbors_02() {
     // --- SCENARIO 1: Simple Valid Moves ---
     // Start: "...." (Length 4, all unpaired)
     let pt_empty = PairTable::try_from("....").unwrap();
@@ -366,36 +358,71 @@ fn test_generate_simple_neighbors_02() {
 }
 
     #[test]
-    fn test_valid_move_generation() {
+    fn test_generate_valid_neighbors_03(){
+        let db1 = ".(((..............)))....";
+        let db2 = "..((((.........))))......";
+
+        let pt1 = PairTable::try_from(db1).expect("Invalid structure");
+        let pt2 = PairTable::try_from(db2).expect("Invalid structure");
+
+        let comparison = compare_structures(&pt1, &pt2);
+        let move_list = comparison.move_list;
+
+        println!("bp_distance ({}) to go from Structure 1 to Structure 2", move_list.len());
+        println!("-----------------------------------------------------");
+
+        let neighbors = generate_valid_neighbors(&pt1, &move_list);
+        println!("Generated only {} valid neighbors from Structure 1 towards Structure 2", neighbors.len());
+        for (idx, n) in neighbors.iter().enumerate() {
+            println!("\nNeighbor {}: {:?} --> New Structure: {}", idx+1, n.applied_move, DotBracketVec::try_from(&n.pt).unwrap());
+        }       
+
+
+
+    }
+
+    #[test]
+    fn test_apply_move() {
         let seq1  = "AGCCAUGAGUGUAUAGUGGGCCUAU";
         let str1 = ".(((..............)))....";
         let str2 = "..((((.........))))......";
+        let model = ViennaRNA::default();
 
-        // Corrected Slicing for Balance (Length 12)
-        // 1..6  => "GCCAU" (Indices 1,2,3,4,5). str1: "(((.." (3 open)
-        // 13..20 => "AGUGGGC" (Indices 13..19). str1: ")))...." (3 closed)
-        // Result: "(((..)))...." -> Balanced.
-        let _subseq = format!("{}{}", &seq1[1..6], &seq1[13..20]);
-        let substr1 = format!("{}{}", &str1[1..6], &str1[13..20]);
-        let substr2 = format!("{}{}", &str2[1..6], &str2[13..20]); // Needs careful checking if balanced
 
-        // Setup structures
-        let pt1 = PairTable::try_from(substr1.as_str()).expect("substr1 invalid");
-        let pt2 = PairTable::try_from(substr2.as_str()).expect("substr2 invalid");
+        // 1. Setup & Validation
+        let seq_vec = NucleotideVec::from_lossy(seq1);
+        let pt_start = PairTable::try_from(str1).unwrap();
+        let pt_target = PairTable::try_from(str2).unwrap();
 
-        // Calculate differences (Moves to go from pt1 -> pt2)
-        let diff = compare_structures(&pt1, &pt2);
+        // 2. Prepare Moves
+        let comparison = compare_structures(&pt_start, &pt_target);
+        let move_list = comparison.move_list;
         
-        // --- TEST THE MOVE GENERATOR ---
-        // We do NOT need 'model' or 'seq_vec' here!
-        let candidates = generate_valid_neighbors(&pt1, &diff.move_list);
 
-        println!("Found {} valid neighbors", candidates.len());
-        
-        for c in candidates {
-            println!("Move: {:?}, New Structure Valid? {}", c.applied_move, true);
-            // Optional: assert that c.pt is what you expect
+        // 3. Initialize Energies
+        let start_energy = model.energy_of_structure(&seq_vec, &pt_start) as f64 / 100.0;
+
+
+        // Initialize Intermediate
+        let current = Intermediate {
+            pt: pt_start,
+            saddle_energy: start_energy,
+            current_energy: start_energy,
+            remaining_moves: move_list,
+            path: Vec::new(),
+        };
+        let expanded = apply_move(&model, &seq_vec, &current, None);
+        println!("Expanded into {} new structures.", expanded.len());
+        println!("-------------------------------------");
+        //println!("Expanded States:");
+        for (idx, state) in expanded.iter().enumerate() {
+            let db = DotBracketVec::try_from(&state.pt).unwrap();
+            println!("State {}: Structure: {}\t Current Energy: {:.2} kcal/mol", idx+1, db, state.current_energy);
         }
+
+        assert!(expanded.len() > 0, "At least one expansion should be possible");
+
+
     }
 
 
@@ -404,16 +431,13 @@ fn test_generate_simple_neighbors_02() {
 
     #[test]
     fn test_greedy_find_path_integration_01() {
+        // OLD _greedy_find_path test
         // Simple hairpin closing example
-        // Seq: GGGGUUUUCCCC
-        // S1:  ............ (Unpaired)
-        // S2:  ((((....)))) (Full Hairpin)
-        
-       // Assume ViennaRNA default model
+        // Assume ViennaRNA default model
         
         let seq = "GGGGUUUUCCCC";
-        let s1 = "............";
-        let s2 = "((((....))))";
+        let s1 = "............"; //(Unpaired)
+        let s2 = "((((....))))"; //(Full Hairpin)
         
         // Initialize Model (This might fail if params aren't found in your env)
         // Ensure you have valid params or a mock model available.
@@ -484,7 +508,7 @@ fn test_generate_simple_neighbors_02() {
         let (steps, stats) = greedy_find_path(&model, seq, s1, s2).unwrap();
         println!("Test steps:");
         for step in steps {
-            println!("{} \t {} \t {} kcal/mol", step.structure,step.move_applied.unwrap_or_default(), step.energy );
+            println!("{} \t {} \t {}", step.structure,step.move_applied.unwrap_or_default(), step.energy );
         } 
         println!("Stats: {:?}", stats);
     }
