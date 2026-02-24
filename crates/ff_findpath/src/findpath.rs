@@ -3,6 +3,7 @@ use ff_energy::{NucleotideVec, ViennaRNA, EnergyModel};
 use ff_structure::{PairTable, DotBracketVec};
 use crate::greedy::{apply_move};
 use std::cmp::Ordering;
+use std::collections::HashSet;
 
 
 //NOTE: the apply_move function in greedy.rs is implemented to have a maximum energy barrier parameter, which is used in findpath but not in the greedy algorithm.
@@ -111,7 +112,8 @@ pub fn findpath(
     // 2. State Variables
     let mut current_m: usize = 1;
     let mut forward_dir = true; // True = s1->s2, False = s2->s1
-    let mut last_result: Option<(Vec<PathStep>, PathStats)> = None;
+    // We add a bool to explicitly store whether this specific result was forward
+    let mut last_result: Option<(Vec<PathStep>, PathStats, bool)> = None;
 
     // 3. Iterative Loop
     loop {
@@ -134,27 +136,28 @@ pub fn findpath(
 
         match pass_result {
             Ok((path, stats)) => {
-                // Success: tighten the energy constraint for the next pass
-                // We overwrite max_energy with the saddle found so far.
-                // This forces the next pass to find a path that is AT LEAST as good.
                 max_energy = Some(stats.saddle_energy);
-                last_result = Some((path, stats));
+                // SAVE the direction (forward_dir) along with the path!
+                last_result = Some((path, stats, forward_dir));
             },
-            // Err(e) => {
-            //     // If it fails on m=1, it means no path exists beneath the initial max_energy
-            //     return Err(format!("Pass m={} (direction={}) failed: {}", current_m, forward_dir, e));
-            // }
-
             Err(_e) => {
+                // Do nothing! Let the loop continue to the next width (m) 
+                // and direction. The last successful result remains safely stored.
+            }
+        }
+
+
+            //TODO ask Stefan what to do in case of a failed pass (e.g. due to energy constraint or topology.
+            //Err(_e) => {
                 // We simply ignore the error.
                 // If this pass got stuck due to the energy constraint or topology, 
                 // we just let the loop continue to the next width (m) and direction.
                 // The last successful result remains safely stored in `last_result`.
-            }
-        }
+            //}
+
 
         // C. Check Exit Condition
-        if current_m == target_m {
+       if current_m >= target_m { // Better safety check
             break;
         }
 
@@ -165,26 +168,27 @@ pub fn findpath(
 
         // Flip Direction
         forward_dir = !forward_dir;
+
     }
 
     // 4. Finalize Result
-    if let Some((path, stats)) = last_result {
-        if forward_dir {
-            // Last pass was Forward (s1 -> s2). Return as is.
+    // Unpack the saved `was_fwd` flag here
+    if let Some((path, stats, was_fwd)) = last_result {
+        if was_fwd {
+            // Path was found S1 -> S2
             Ok((path, stats))
         } else {
-            // Last pass was Backward (s2 -> s1). Invert trajectory to match s1 -> s2.
+            // Path was found S2 -> S1, we must invert it!
             invert_path_trajectory(model, &seq_vec, &pt_start, &path)
         }
     } else {
-        Err("Search loop finished without producing a result.".to_string())
+        Err("Search loop finished without producing a result. All passes failed.".to_string())
     }
 }
 
 
 
-// --- Worker Function ---
-
+// ------------ Worker Function ------------
 /// Runs a single, direction-agnostic beam search pass.
 fn run_beam_pass(
     model: &ViennaRNA,
@@ -216,23 +220,39 @@ fn run_beam_pass(
     for _step in 1..=total_steps {
         let mut next_candidates = Vec::new();
 
-        // Expand all survivors in the beam
+        // 1. Expand all survivors in the beam
         for parent in beam {
             let mut neighbors = apply_move(model, seq_vec, &parent, max_energy);
             next_candidates.append(&mut neighbors);
         }
 
         if next_candidates.is_empty() {
-             return Err("empty-warning. Search stuck (dead end due to topology or energy constraint)".to_string());
+             return Err("Search stuck (dead end due to topology or energy constraint)".to_string());
         }
 
-        // Sort: Min Saddle -> Min Current
+        // 2. Sort: Min Saddle -> Min Current
+        // This ensures the BEST paths are at the front of the list.
         next_candidates.sort_by(|a, b| {
             a.saddle_energy.partial_cmp(&b.saddle_energy).unwrap_or(Ordering::Equal)
                 .then_with(|| a.current_energy.partial_cmp(&b.current_energy).unwrap_or(Ordering::Equal))
         });
 
-        // Prune to keep only top 'm' candidates
+        // 3. Deduplicate (Line 13 in the algorithm)
+        // We track the PairTables we've seen in this specific generation.
+        // Because the list is sorted, the first time we `insert` a structure, 
+        // it is the lowest-energy path to that structure.
+        let mut seen_structures = HashSet::new();
+        
+        next_candidates.retain(|candidate| {
+            // Note: This assumes PairTable implements `Eq` and `Hash`.
+            // If it doesn't, you can hash a string representation:
+            // let hash_key = DotBracketVec::try_from(&candidate.pt).unwrap().to_string();
+            // seen_structures.insert(hash_key)
+            
+            seen_structures.insert(candidate.pt.clone()) 
+        });
+
+        // 4. Prune to keep only top 'm' unique candidates
         if next_candidates.len() > m {
             next_candidates.truncate(m);
         }
@@ -247,7 +267,11 @@ fn run_beam_pass(
     reconstruct_path_from_moves(model, seq_vec, start_pt, &winner.path)
 }
 
-// --- Helpers ---
+
+
+
+
+// ----------------- Helpers ----------------
 
 /// Reconstructs the full Vec<PathStep> trajectory from a sequence of moves.
 fn reconstruct_path_from_moves(

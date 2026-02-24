@@ -2,14 +2,30 @@ use std::fmt;
 use ff_energy::{NucleotideVec, ViennaRNA, EnergyModel}; 
 use ff_structure::{DotBracketVec, PairTable};
 
-/// Move represent the insertion or deletion of a base pair (i, j) between two structures. 
-/// If is_insertion is true, it represents the insertion of the base pair (i, j) into the structure.
-/// If is_insertion is false, it represents the deletion of the base pair (i, j) from the structure.
-/// Move corresponds to an elementary move in the transformation from two consecutive intermediate structures S_t to S_t+1.
+/// `Move` corresponds to an elementary move in the transformation from two RNA structures`.
+///
+/// it represent the insertion or deletion of a base pair at specific indices (i, j) between two structures. 
+/// 
+/// # Fields:
+/// - `i`: The index of the first base in the pair.
+/// - `j`: The index of the second base in the pair.
+/// - `is_insertion`: A boolean flag indicating whether the move is an insertion (true) or deletion (false).
+/// 
+/// 
 /// For example, if we have a move with i = 2, j = 5, is_insertion = true, it means that we are inserting the base pair (2, 5) into the structure.
 /// The corresponding PairTable representation would have pt[2] = Some(5) and pt[5] = Some(2).
+/// 
+/// # Note:
 /// We define the base pair distance between two structures as the number of moves required to transform one structure into the other.
 /// This means one move corresponds to the change of two indices in the PairTable representation.
+/// 
+/// # Example usage:
+/// ```rust
+/// use ff_findpath::utils::Move;
+/// 
+/// let mv = Move { i: 2, j: 5, is_insertion: true };
+/// ```
+/// 
 // Derive Default, makes default Move { i: 0, j: 0, is_insertion: false } (del (0,0) at start of every path)
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
 pub struct Move {

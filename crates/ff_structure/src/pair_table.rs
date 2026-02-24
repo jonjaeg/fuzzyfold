@@ -6,7 +6,7 @@ use std::fmt;
 
 
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Hash, Debug, Clone, PartialEq, Eq)]
 pub struct PairTable(pub Vec<Option<usize>>);
 
 impl PairTable {
