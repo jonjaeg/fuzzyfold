@@ -29,3 +29,12 @@ harness = false
 
 [badges]
 maintenance = { status = "actively-developed" }
+
+
+[[bin]]
+name = "ff-greedy"
+path = "src/bin/ff-greedy.rs"
+
+[[bin]]
+name = "ff-findpath"
+path = "src/bin/ff-findpath.rs"

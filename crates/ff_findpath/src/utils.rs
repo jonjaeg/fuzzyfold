@@ -376,7 +376,7 @@ mod tests {
 
 
         let moves = prepare_moves(&pt1, &pt2);
-        let (steps, stats) = analyze_folding_path(seq1, struct1, &moves);
+        let (_steps, stats) = analyze_folding_path(seq1, struct1, &moves);
         //println!("Test steps:");
         //for step in steps {
         //    println!("{}", step);
