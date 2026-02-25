@@ -13,7 +13,7 @@ use ff_structure::{DotBracketVec, PairTable};
 /// 
 /// 
 /// For example, if we have a move with i = 2, j = 5, is_insertion = true, it means that we are inserting the base pair (2, 5) into the structure.
-/// The corresponding PairTable representation would have pt[2] = Some(5) and pt[5] = Some(2).
+/// The corresponding PairTable representation would have `pt[2] = Some(5)` and `pt[5] = Some(2)`.
 /// 
 /// # Note:
 /// We define the base pair distance between two structures as the number of moves required to transform one structure into the other.
@@ -198,6 +198,19 @@ pub struct PathStats {
     pub barrier_energy: f64,    // max_en - start_en
     pub start_energy: f64,
     pub end_energy: f64,
+}
+
+impl fmt::Display for PathStats {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "Saddle Energy: {:.2} kcal/mol, Barrier Energy: {:.2} kcal/mol, Start Energy: {:.2} kcal/mol, End Energy: {:.2} kcal/mol",
+            self.saddle_energy,
+            self.barrier_energy,
+            self.start_energy,
+            self.end_energy
+        )
+    }
 }
 
 

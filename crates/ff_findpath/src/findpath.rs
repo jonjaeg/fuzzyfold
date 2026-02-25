@@ -8,16 +8,37 @@ use std::collections::HashSet;
 
 //NOTE: the apply_move function in greedy.rs is implemented to have a maximum energy barrier parameter, which is used in findpath but not in the greedy algorithm.
 
-/// findpath functions.
-/// It takes a ViennaRNA energy model, a sequence, a start structure, a target structure, and a maximum energy barrier. It returns a folding path (as a vector of PathStep) and some statistics about the path (as PathStats).
-/// The search-with parameter m is used to increase the search space by allowing the m best neighbors (in terms of energy) to be considered at each step, instead of just the single best neighbor (i.e m=1 is equivalent to the greedy algorithm). 
-/// This can help to find better paths that might be missed by a purely greedy approach, at the cost of increased computational time.
-/// The search space is explored using a breath-first-search approach, where the search-with parameter is doubled at each iteration to allow for wider search.
-/// Also the search is performed from both directions (s1 to s2 and s2 to s1), alternating after each applied move.
+/// # Input 
+/// It takes a 
+/// -  `model`: The ViennaRNA energy model to evaluate energies., 
+/// -  `sequence`: the RNA sequence as a string,
+/// -  `s1`: the starting structure in dot-bracket notation, 
+/// -  `s2`: the target structure in dot-bracket notation,
+/// -  `target_m`: the desired search width parameter `m` for the findpath algorithm (default: 1 = greedy search), 
+/// -  `max_energy`: an optional parameter to set a maximum energy threshold for the search. 
+/// 
+/// 
+/// # Return
+/// It returns a `Result` which is either:
+/// - `Ok((Vec<PathStep>, PathStats))` containing the folding path (as a vector of `PathStep`) and some statistics about the path (as `PathStats`), or 
+/// - `Err(String)` containing an error message if the input parameters are invalid or if the search fails (e.g. due to energy constraints or topological issues).
+/// 
+/// 
+/// # Algorithmic details
+/// The search-with parameter `m` is used to increase the search space by allowing the `m` best neighbors (in terms of lowest energy barrier) to be considered at each step, instead of just the single best neighbor (i.e `m=1` is equivalent to the greedy algorithm). 
+/// The algorithm iteratively expands the search space by increasing `m` until it reaches the `target_m` specified by the user. 
+/// The search space is explored using a **breath-first-search** approach, where the search-with parameter is doubled at each iteration to allow for wider search.
 ///
-/// Heuristic findpath strategy with optimized bidirectional beam search.
-/// Accepts an optional 'max_energy' parameter to bound the absolute maximum 
-/// energy allowed during the search.
+/// It starts with with `m=1` (greedy search) and doubles `m` in each iteration, allowing for a wider search and potentially upper energy barriers to be overcome.
+/// This can help to find better paths that might be missed by a purely greedy approach, at the cost of increased computational time.
+/// Also the search is performed from both directions (s1 to s2 and s2 to s1), alternating after each applied move (bidirectional beam search).
+/// The energy barrier is tracked during the search, and if a candidate move results in a structure with energy above the specified `max_energy` threshold, that move is discarded and not added to the beam for the next iteration.
+/// Initally the `max_energy` threshold is not set, but after the first successful pass, it is updated to the saddle energy of the best path found so far. 
+///
+///
+/// # Internal function calls 
+/// - `run_beam_pass()`: This function runs a single, direction-agnostic beam search pass with a specfiic `m` value. 
+/// - `invert_path_trajectory()`: This function takes a backward trajectory (s2 -> s1), extracts the moves, reverses and inverts them, and reconstructs the forward trajectory (s1 -> s2).
 pub fn findpath(
     model: &ViennaRNA,
     sequence: &str,
@@ -47,10 +68,12 @@ pub fn findpath(
     // 2. State Variables
     let mut current_m: usize = 1;
     let mut forward_dir = true; // True = s1->s2, False = s2->s1
-    // We add a bool to explicitly store whether this specific result was forward
+    // We add a bool to explicitly store whether this specific result was forward or backward (final reconstruction needs to know this)
     let mut last_result: Option<(Vec<PathStep>, PathStats, bool)> = None;
 
     // 3. Iterative Loop
+    // start with m = 1, and keep increasing until we reach target_m.
+    // also, we keep alternating between forward and backward search.
     loop {
         // A. Select Inputs based on Direction
         let (current_pt, current_moves) = if forward_dir {
@@ -68,7 +91,9 @@ pub fn findpath(
             current_m, 
             max_energy
         );
-
+        // match on the results of the last pass. 
+        // If it was successful, we update max_energy and save the path + stats + direction. 
+        // If it failed, we do nothing and let the loop continue to the next iteration (with increased m and flipped direction). The last successful result remains safely stored.
         match pass_result {
             Ok((path, stats)) => {
                 max_energy = Some(stats.saddle_energy);
@@ -76,28 +101,22 @@ pub fn findpath(
                 last_result = Some((path, stats, forward_dir));
             },
             Err(_e) => {
+                // TODO ask Stefan what to do in case of a failed pass (e.g. due to energy constraint or topology.
                 // Do nothing! Let the loop continue to the next width (m) 
                 // and direction. The last successful result remains safely stored.
             }
         }
-
-
-            //TODO ask Stefan what to do in case of a failed pass (e.g. due to energy constraint or topology.
-            //Err(_e) => {
-                // We simply ignore the error.
-                // If this pass got stuck due to the energy constraint or topology, 
-                // we just let the loop continue to the next width (m) and direction.
-                // The last successful result remains safely stored in `last_result`.
-            //}
+            
+            
 
 
         // C. Check Exit Condition
-       if current_m >= target_m { // Better safety check
+       if current_m >= target_m { 
             break;
         }
 
         // D. Prepare Next Iteration
-        // Double m, clamp to target_m
+        // Double m, set m to target_m if doubling would exceed it.
         let next_m = current_m * 2;
         current_m = if next_m > target_m { target_m } else { next_m };
 
@@ -125,6 +144,19 @@ pub fn findpath(
 
 // ------------ Worker Function ------------
 /// Runs a single, direction-agnostic beam search pass.
+/// 
+/// # Input:
+/// - `model`: The ViennaRNA energy model to evaluate energies.
+/// - `seq_vec`: The sequence as a vector of nucleotides.
+/// - `start_pt`: The starting structure as a PairTable.
+/// - `initial_moves`: The list of moves to apply (direction-agnostic).
+/// - `m`: The beam width for this pass.
+/// - `max_energy`: Optional maximum energy threshold to filter candidates.
+/// 
+/// # Output:
+/// - `Ok((Vec<PathStep>, PathStats))` if a path is found within the constraints.
+/// - `Err(String)` if the search fails (e.g. due to energy constraints or topological issues).
+/// 
 fn run_beam_pass(
     model: &ViennaRNA,
     seq_vec: &NucleotideVec,
@@ -172,7 +204,7 @@ fn run_beam_pass(
                 .then_with(|| a.current_energy.partial_cmp(&b.current_energy).unwrap_or(Ordering::Equal))
         });
 
-        // 3. Deduplicate (Line 13 in the algorithm)
+        // 3. Deduplicate
         // We track the PairTables we've seen in this specific generation.
         // Because the list is sorted, the first time we `insert` a structure, 
         // it is the lowest-energy path to that structure.

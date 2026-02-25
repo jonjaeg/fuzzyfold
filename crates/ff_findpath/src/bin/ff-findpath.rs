@@ -88,7 +88,8 @@ fn main()  -> Result<(), Box<dyn std::error::Error>> {
         println!("{} \t {} \t {} kcal/mol", step.structure,step.move_applied.unwrap_or_default(), step.energy );
     }   
         println!("-----------------");
-        println!("{:?}", stats);
+        println!("Statistics:");
+        println!("{}", stats);
     Ok(())
 
 }
