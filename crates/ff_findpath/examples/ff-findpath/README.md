@@ -4,10 +4,21 @@
 
 The program `ff-findpath` calculates a **folding trajectory** of
 nucleic acid sequences from a starting secondary structure to a target secondary structure.
-The program shows which base pair moves (deletion/insertion) are needed to fold from the start to the target structure given a findpath folding path heuristcs which **improves** upon the greedy folding paths heuristics.
+The program shows which base pair moves (deletion/insertion) are needed to fold from the start to the target structure given a findpath folding path heuristcs which **improves** upon the greedy folding paths heuristics. 
 Each trajectory is shown as a sequence of structures with applied moves and associated
 energies. The program then gives statistics about the energy barrier along this trajectory. 
 
+## Improvining upon Morgan-Higgs 
+
+The algorithm can be seen as an extension of the idea coined by the Morgan-Higgs
+heuristic. It introduces an additional parameter, the search width `m`, which
+regulates the search by retaining all `m` best paths for every distance step. The
+**underlying principle** is that optimal direct paths will almost never be the result
+of purely greedy decisions, however, often the second or third best move from a
+given intermediate may be sufficient for finding the best possible path. 
+
+Practically, when the search width is set to `m = 1`, the resulting path is computed
+greedily and yields the same outcome `ff-greedy`.
 ---
 
 ## Using an input file
