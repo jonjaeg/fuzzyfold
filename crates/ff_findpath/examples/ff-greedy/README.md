@@ -56,6 +56,7 @@ Statistics:
 Saddle energy: 4.30 kcal/mol, Barrier energy: 6.50 kcal/mol, Start energy: -2.20 kcal/mol, End energy: -2.70 kcal/mol
 ```
 
+
 Each line represents one **structure** visited during the trajectory, with columns:
 
 | Header | Description |

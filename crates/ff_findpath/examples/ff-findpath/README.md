@@ -54,6 +54,8 @@ AGCCAUGAGUGUAUAGUGGGCCUAU 	 applied move 	 energy
 -----------------
 Statistics:
 Saddle energy: 1.60 kcal/mol, Barrier energy: 3.80 kcal/mol, Start energy: -2.20 kcal/mol, End energy: -2.70 kcal/mol```
+```
+
 
 Each line represents one **structure** visited during the trajectory, with columns:
 
