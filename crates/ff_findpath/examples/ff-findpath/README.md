@@ -19,6 +19,7 @@ given intermediate may be sufficient for finding the best possible path.
 
 Practically, when the search width is set to `m = 1`, the resulting path is computed
 greedily and yields the same outcome `ff-greedy`.
+
 ---
 
 ## Using an input file
