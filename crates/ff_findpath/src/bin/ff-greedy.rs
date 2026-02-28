@@ -1,4 +1,3 @@
-//use ff_findpath::utils::{prepare_moves, analyze_folding_path};
 use ff_findpath::greedy::{greedy_find_path};
 use ff_energy::ViennaRNA;
 

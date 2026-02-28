@@ -1,5 +1,4 @@
-use crate::utils::{Move, Intermediate, PathStats, PathStep, compare_structures};
-use crate::greedy::{apply_move};
+use crate::utils::{Move, Intermediate, PathStats, PathStep, compare_structures, apply_move};
 use ff_energy::{NucleotideVec, ViennaRNA, EnergyModel};
 use ff_structure::{PairTable, DotBracketVec};
 use std::cmp::Ordering;
