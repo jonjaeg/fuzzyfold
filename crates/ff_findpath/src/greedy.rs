@@ -13,10 +13,19 @@ pub struct NeighborCandidate {
 
 
 
-/// generate_valid_neighbors checks which moves are valid from the current PairTable,
-/// applies them, and returns a list of valid neighbor candidates without calculating energy.
-/// Checks topology and generates valid PairTables. 
-/// Does NOT calculate energy or clone paths yet.
+/// Generates all valid neighbors of the given input structure.
+/// 
+/// Checks if the move is valid (topology) and applies it to generate a new PairTable, as well as the move that was valid.
+/// 
+/// NOTE: This function does NOT calculate energy or clone paths. It only checks if the move is valid (e.g. no pseudoknots) and applies it to generate a new PairTable. 
+/// The energy calculation and path cloning are done in the apply_move function, which calls this function to get valid neighbors before calculating their energies and updating the search state.
+/// 
+/// # Input
+/// - `current_pt`: The current structure represented as a PairTable. This is the structure from which we want to generate neighbors by applying the remaining moves.
+/// - `available_moves`: A list of moves that can potentially be applied to the current structure to generate neighbors. 
+/// 
+/// # Output
+/// It returns a vector of `NeighborCandidate`, where each candidate includes the new PairTable resulting from applying a valid move, the move that was applied, and the original index of that move in the `available_moves` list.
 pub fn generate_valid_neighbors(
     current_pt: &PairTable,
     available_moves: &[Move],
@@ -67,11 +76,22 @@ pub fn generate_valid_neighbors(
     candidates
 }
 
-/// greedy apply_move performs one expansion step from the given Intermediate state.
-/// that means it generates all valid neighbors, calculates their energies,
-/// filters them based on max_energy, and constructs new Intermediate states.
-/// Calls the generate_valid_neighbors, calculates energy, filters, and builds Intermediate.
-/// max_energy is an optional threshold to prune high-energy states early. (idea for findpath. with greedy this is not used!)
+/// Performs one expansion step from the given Intermediate state.
+/// 
+/// It generates all valid neighbors by calling the `generate_valid_neighbors` function, calculates their energies,
+///
+/// # Input
+/// - `model`: The ViennaRNA energy model to evaluate energies.
+/// - `seq_vec`: The RNA sequence as a vector of nucleotides (NucleotideVec).
+/// - `intermediate`: The current state of the search, including the current structure (as a PairTable), the saddle energy so far, the current energy, the list of remaining moves, and the path of moves taken to reach this state.
+/// - `max_energy`: An optional parameter to set a maximum energy threshold for the search. If provided, any neighbor with energy above this threshold will be filtered out and not returned as a valid neighbor. 
+/// This can be used to prune the search space and focus on more promising trajectories, but it is not used in the greedy algorithm (as it explores all valid neighbors and picks the best one).
+/// 
+/// # Output
+/// It returns a vector of `Intermediate` states, each representing a valid neighbor of the input `intermediate`.
+/// 
+/// # Internal calls:
+/// - generate_valid_neighbors to get valid topologies
 pub fn apply_move(
     model: &ViennaRNA,
     seq_vec: &NucleotideVec,
@@ -115,88 +135,24 @@ pub fn apply_move(
     results
 }
 
+/// Calculates a folding path and an energy barrier between two RNA secondary structures using the greedy heuristics (Morgan-Higgs algorithm).
+/// # Input 
+/// It takes a 
+/// -  `model`: The ViennaRNA energy model to evaluate energies., 
+/// -  `sequence`: the RNA sequence as a string,
+/// -  `s1`: the starting structure in dot-bracket notation, 
+/// -  `s2`: the target structure in dot-bracket notation,
 
-/// Finds a folding path from s1 to s2 using a greedy strategy.
-/// At each step, it generates all valid moves that lead toward the target,
-/// evaluates their energy, and picks the one that minimizes the saddle energy 
-/// (and breaks ties with current energy).
-pub fn _greedy_find_path(
-    model: &ViennaRNA,
-    sequence: &str, // Passed as &str for convenience, converted inside if needed
-    s1: &str,
-    s2: &str,
-) -> Result<(Vec<Move>, f64, f64), String> {
-    
-    // 1. Setup Data Structures
-    let seq_vec = &NucleotideVec::from_lossy(sequence); // Assuming NucleotideVec has From<&str>
-    let pt_start = PairTable::try_from(s1).map_err(|_| "Invalid start structure s1")?;
-    let pt_target = PairTable::try_from(s2).map_err(|_| "Invalid target structure s2")?;
-
-    // 2. Prepare Moves (Compare start vs target)
-    let comparison = compare_structures(&pt_start, &pt_target);
-    let move_list = comparison.move_list;
-
-    // Edge Case: If structures are identical, return empty path with 0 barrier
-    if move_list.is_empty() {
-        // Calculate energy of the static structure
-        let start_energy = model.energy_of_structure(seq_vec, &pt_start) as f64 / 100.0;
-        return Ok((Vec::new(), start_energy, 0.0));
-    }
-
-    // 3. Initialize Starting State
-    let start_energy = model.energy_of_structure(&seq_vec, &pt_start) as f64 / 100.0;
-    
-    let mut current = Intermediate {
-        pt: pt_start.clone(),
-        saddle_energy: start_energy,
-        current_energy: start_energy,
-        remaining_moves: move_list.clone(),
-        path: Vec::new(),
-    };
-
-    let total_steps = move_list.len();
-
-    // 4. Greedy Loop
-    // We iterate exactly 'total_steps' times because we must apply every move
-    // in the list to reach the target structure.
-    for _step in 1..=total_steps {
-        
-        // Generate and evaluate neighbors
-        // We pass 'None' for max_energy as the Python script passes None in the loop
-        let candidates = apply_move(model, &seq_vec, &current, None);
-
-        if candidates.is_empty() {
-            return Err("Greedy search got stuck: No valid moves available to progress toward target.".to_string());
-        }
-
-        // Greedy Selection: Minimize (saddle_energy, current_energy)
-        // unwrap is safe because we checked !candidates.is_empty()
-        let best_candidate = candidates
-            .into_iter()
-            .min_by(|a, b| {
-                a.saddle_energy
-                    .partial_cmp(&b.saddle_energy)
-                    .unwrap_or(std::cmp::Ordering::Equal)
-                    .then_with(|| {
-                        a.current_energy
-                            .partial_cmp(&b.current_energy)
-                            .unwrap_or(std::cmp::Ordering::Equal)
-                    })
-            })
-            .unwrap();
-
-        // Advance to next state
-        current = best_candidate;
-    }
-
-    // 5. Finalize Results
-    // The barrier energy is (Highest Point - Start Energy)
-    let barrier_energy = current.saddle_energy - start_energy;
-
-    Ok((current.path, current.saddle_energy, barrier_energy))
-}
-
-
+/// 
+/// # Output
+/// It returns a `Result` which is either:
+/// - `Ok((Vec<PathStep>, PathStats))` containing the folding path (as a vector of `PathStep`) and some statistics about the path (as `PathStats`), or 
+/// - `Err(String)` containing an error message if the input parameters are invalid or if the search fails (e.g. due to energy constraints or topological issues).
+/// 
+/// # Internal calls:
+/// - `compare_structures()`: This function compares the starting and target structures to generate a list of moves that can transform one structure into the other. This is done once at the beginning to prepare the move lists for both directions.
+/// - `apply_move()`: This function generates neighboring structures by applying the allowed moves to the current structure, while also calculating their energies
+/// NOTE: the `max_energy` parameter is not used in greedy search, as it is a greedy algorithm that explores all valid neighbors and picks the best one.
 pub fn greedy_find_path(
     model: &ViennaRNA,
     sequence: &str,
@@ -288,7 +244,9 @@ pub fn greedy_find_path(
 
 
 
-
+// #####################################
+//                  TESTS
+// #####################################
 
 
 
@@ -340,8 +298,11 @@ fn test_generate_valid_neighbors_02() {
     // Neighbor 0 should have 0-3 paired
     assert_eq!(neighbors[0].pt[0], Some(3));
 
+}
 
-    // --- SCENARIO 2: Crossing / Pseudoknot Rejection ---
+    #[test]
+    fn test_generate_valid_neighbors_03_pseudoknot(){
+        // --- SCENARIO 2: Crossing / Pseudoknot Rejection ---
     // Start: "(...)." (Length 6)
     // Pair exists at 0-4. 
     // We try to pair index 3 (inside the loop) with index 5 (outside the loop).
@@ -354,11 +315,14 @@ fn test_generate_valid_neighbors_02() {
     
     println!("\n--- Scenario 2: Crossing Check ---");
     println!("Trying to pair (3,5) on structure '(...).'");
+    println!("No valid neighbors, as expected. Would create pseudoknot.");
     assert_eq!(neighbors_cross.len(), 0, "Crossing move should be rejected automatically");
-}
+
+    }
 
     #[test]
-    fn test_generate_valid_neighbors_03(){
+    fn test_generate_valid_neighbors_printing_debugging(){
+        // Does not test anything, just for visual inspection and debugging of the generated neighbors.
         let db1 = ".(((..............)))....";
         let db2 = "..((((.........))))......";
 
@@ -428,10 +392,8 @@ fn test_generate_valid_neighbors_02() {
 
 
 
-
     #[test]
     fn test_greedy_find_path_integration_01() {
-        // OLD _greedy_find_path test
         // Simple hairpin closing example
         // Assume ViennaRNA default model
         
@@ -442,22 +404,24 @@ fn test_generate_valid_neighbors_02() {
         // Initialize Model (This might fail if params aren't found in your env)
         // Ensure you have valid params or a mock model available.
         let model = ViennaRNA::default();
-        let result = _greedy_find_path(&model, seq, s1, s2);
+        let result = greedy_find_path(&model, seq, s1, s2);
 
         match result {
-            Ok((path, saddle, barrier)) => {
-                println!("Path found with {} steps", path.len());
-                println!("Saddle Energy: {:.2} kcal/mol", saddle);
-                println!("Barrier Height: {:.2} kcal/mol", barrier);
+            Ok((trajectory, stats)) => {
+                println!("Path found with {} steps", trajectory.len());
+                println!("Saddle Energy: {:.2} kcal/mol", stats.saddle_energy);
+                println!("Barrier Height: {:.2} kcal/mol", stats.barrier_energy);
                 
                 // Assertions
-                assert_eq!(path.len(), 4, "Should take 4 base pair insertions to close the stem");
+                assert_eq!(trajectory.len(), 5, "Should have 5 PathStep entries in the trajectory (including start and end)");
                 // Check if the final path actually formed the structure
                 // We know it starts empty, so all moves should be insertions
-                for m in path {
-                    assert!(m.is_insertion, "All moves should be insertions for this test case");
+                
+                for m in trajectory{
+                    println!("{:?}", m)
                 }
-            },
+                }
+            
             Err(e) => panic!("Greedy path search failed: {}", e),
         }
     }
@@ -474,19 +438,18 @@ fn test_generate_valid_neighbors_02() {
         // Initialize Model (This might fail if params aren't found in your env)
         // Ensure you have valid params or a mock model available.
         let model = ViennaRNA::default();
-        let result = _greedy_find_path(&model, seq, s1, s2);
+        let result = greedy_find_path(&model, seq, s1, s2);
 
         match result {
-            Ok((path, saddle, barrier)) => {
-                println!("Path found with {} steps", path.len());
-                println!("Saddle Energy: {:.2} kcal/mol", saddle);
-                println!("Barrier Height: {:.2} kcal/mol", barrier);
+            Ok((trajectory, stats)) => {
+                println!("Path found with {} steps", trajectory.len());
+                println!("Saddle Energy: {:.2} kcal/mol", stats.saddle_energy);
+                println!("Barrier Height: {:.2} kcal/mol", stats.barrier_energy);
                 
                 // Assertions
-                assert_eq!(path.len(), 7, "Should take 7 base pair insertions to close the stem");
+                assert_eq!(trajectory.len(), 8, "Should have 8 PathStep entries in the trajectrory (including start and end)");
                 // Check if the final path actually formed the structure
-                // We know it starts empty, so all moves should be insertions
-                for m in path{
+                for m in trajectory{
                     println!("{:?}", m)
                 }
                 
@@ -496,7 +459,8 @@ fn test_generate_valid_neighbors_02() {
     }
 
     #[test]
-    fn test_greedy_find_path_printing(){
+    fn test_greedy_find_path_printing_debugging(){
+        // Does not test anything, just prints the path and stats for visual inspection and debugging.
         let seq = "AGCCAUGAGUGUAUAGUGGGCCUAU";
         let s1 = ".(((..............)))....";
         let s2 = "..((((.........))))......";
@@ -510,7 +474,7 @@ fn test_generate_valid_neighbors_02() {
         for step in steps {
             println!("{} \t {} \t {}", step.structure,step.move_applied.unwrap_or_default(), step.energy );
         } 
-        println!("Stats: {:?}", stats);
+        println!("Stats: {}", stats);
     }
 }
 

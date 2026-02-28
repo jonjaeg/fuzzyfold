@@ -8,6 +8,7 @@ use std::collections::HashSet;
 
 //NOTE: the apply_move function in greedy.rs is implemented to have a maximum energy barrier parameter, which is used in findpath but not in the greedy algorithm.
 
+/// Calculates a folding path and an energy barrier between two RNA secondary structures using the findpath algorithm.
 /// # Input 
 /// It takes a 
 /// -  `model`: The ViennaRNA energy model to evaluate energies., 
@@ -18,11 +19,34 @@ use std::collections::HashSet;
 /// -  `max_energy`: an optional parameter to set a maximum energy threshold for the search. 
 /// 
 /// 
-/// # Return
+/// # Output
 /// It returns a `Result` which is either:
 /// - `Ok((Vec<PathStep>, PathStats))` containing the folding path (as a vector of `PathStep`) and some statistics about the path (as `PathStats`), or 
 /// - `Err(String)` containing an error message if the input parameters are invalid or if the search fails (e.g. due to energy constraints or topological issues).
 /// 
+/// 
+/// # Example
+/// ```rust
+/// use ff_findpath::findpath::findpath;
+/// use ff_energy::ViennaRNA;
+/// 
+/// let model = ViennaRNA::default();
+/// let sequence = "AGCCAUGAGUGUAUAGUGGGCCUAU";
+/// let struct1 = ".(((..............)))....";
+/// let struct2 = "..((((.........))))......";
+/// let result = findpath(&model, sequence, struct1, struct2, 10, None);
+/// 
+/// let (path, stats) = result.unwrap();
+/// println!("Folding Path found with findpath algorithm:");
+/// println!("-----------------");
+/// println!("{} \t applied move \t energy", sequence);
+/// for step in path {
+///     println!("{} \t {} \t {} kcal/mol", step.structure, step.move_applied.unwrap_or_default(), step.energy );
+/// }   
+/// println!("-----------------");
+/// println!("Statistics:");
+/// println!("{}", stats);
+/// ```
 /// 
 /// # Algorithmic details
 /// The search-with parameter `m` is used to increase the search space by allowing the `m` best neighbors (in terms of lowest energy barrier) to be considered at each step, instead of just the single best neighbor (i.e `m=1` is equivalent to the greedy algorithm). 
@@ -37,6 +61,7 @@ use std::collections::HashSet;
 ///
 ///
 /// # Internal function calls 
+/// - `compare_structures()`: This function compares the starting and target structures to generate a list of moves that can transform one structure into the other. This is done once at the beginning to prepare the move lists for both directions.
 /// - `run_beam_pass()`: This function runs a single, direction-agnostic beam search pass with a specfiic `m` value. 
 /// - `invert_path_trajectory()`: This function takes a backward trajectory (s2 -> s1), extracts the moves, reverses and inverts them, and reconstructs the forward trajectory (s1 -> s2).
 pub fn findpath(
@@ -157,7 +182,15 @@ pub fn findpath(
 /// - `Ok((Vec<PathStep>, PathStats))` if a path is found within the constraints.
 /// - `Err(String)` if the search fails (e.g. due to energy constraints or topological issues).
 /// 
-fn run_beam_pass(
+/// # Algorithmic details:
+/// The function initializes a beam with the starting structure and iteratively expands it by applying the allowed moves. 
+/// At each step, it generates candidate neighbors, filters them based on the `max_energy`
+/// threshold, sorts them by saddle energy (and current energy as a tiebreaker), deduplicates them, and prunes to keep only the top `m` candidates for the next iteration.
+/// 
+/// # Internal function calls:
+/// - `apply_move()`: This function generates neighboring structures by applying the allowed moves to the current structure, while also calculating their energies and filtering based on the `max_energy` threshold.
+/// - `reconstruct_path_from_moves()`: If a valid path is found after the final iteration, this function reconstructs the full trajectory of structures and energies from the sequence of moves that led to the solution.
+pub fn run_beam_pass(
     model: &ViennaRNA,
     seq_vec: &NucleotideVec,
     start_pt: &PairTable,   
@@ -240,8 +273,20 @@ fn run_beam_pass(
 
 // ----------------- Helpers ----------------
 
-/// Reconstructs the full Vec<PathStep> trajectory from a sequence of moves.
-fn reconstruct_path_from_moves(
+/// Helper function:
+/// Reconstructs the full trajectory from a sequence of moves.
+/// 
+/// # Input:
+/// - `model`: The ViennaRNA energy model to evaluate energies.
+/// - `seq_vec`: The sequence as a vector of nucleotides.
+/// - `start_pt`: The starting structure as a PairTable.
+/// - `moves`: The sequence of moves that led to the solution.
+/// 
+/// # Output:
+/// - `Ok((Vec<PathStep>, PathStats))` containing the full trajectory and statistics.
+/// - `Err(String)` if reconstruction fails (e.g. due to invalid moves).
+///
+pub fn reconstruct_path_from_moves(
     model: &ViennaRNA,
     seq_vec: &NucleotideVec,
     start_pt: &PairTable,
@@ -293,9 +338,22 @@ fn reconstruct_path_from_moves(
     Ok((trajectory, stats))
 }
 
-/// Takes a backward trajectory (s2 -> s1), extracts the moves, reverses and inverts them, 
-/// and reconstructs the forward trajectory (s1 -> s2).
-fn invert_path_trajectory(
+/// Helper function:
+/// Takes a backward trajectory (s2 -> s1) and inverts it to reconstruct the forward trajectory (s1 -> s2).
+/// 
+/// # Input:
+/// - `model`: The ViennaRNA energy model to evaluate energies.
+/// - `seq_vec`: The sequence as a vector of nucleotides.
+/// - `true_start_pt`: The true starting structure (s1) as a PairTable
+/// - `wrong_dir_path`: The trajectory found in the wrong direction (s2 -> s1) as a slice of PathStep.
+/// 
+/// # Output:
+/// - `Ok((Vec<PathStep>, PathStats))` containing the reconstructed forward trajectory and statistics.
+/// - `Err(String)` if the inversion or reconstruction fails (e.g. due to invalid moves).
+/// 
+/// # Internal function calls:
+/// - `reconstruct_path_from_moves()`: reconstruct the forward trajectory
+pub fn invert_path_trajectory(
     model: &ViennaRNA,
     seq_vec: &NucleotideVec,
     true_start_pt: &PairTable,
@@ -318,6 +376,22 @@ fn invert_path_trajectory(
     // Reconstruct the proper trajectory starting from S1
     reconstruct_path_from_moves(model, seq_vec, true_start_pt, &inverted_moves)
 }
+
+
+
+
+
+
+
+
+// #####################################
+//                  TESTS
+// #####################################
+
+
+
+
+
 
 
 #[cfg(test)]

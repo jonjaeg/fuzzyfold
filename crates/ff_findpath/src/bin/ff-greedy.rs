@@ -14,7 +14,7 @@ use clap::Parser;
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Args {
-    /// Name of file containing test data
+    /// Name of file containing input data
     #[arg(short, long)]
     filename: String,
 
@@ -79,10 +79,11 @@ fn main()  -> Result<(), Box<dyn std::error::Error>> {
     let model = ViennaRNA::default();
 
     let (steps, stats) = greedy_find_path(&model, seq, struct1, struct2).unwrap();
-    println!("Folding Path:");
+    println!("Folding Path found with greedy algorithm:");
     println!("-----------------");
+    println!("{} \t applied move \t energy", seq);
     for step in steps {
-        println!("{} \t {} \t {} kcal/mol", step.structure,step.move_applied.unwrap_or_default(), step.energy );
+        println!("{} \t {} \t {} kcal/mol", step.structure, step.move_applied.unwrap_or_default(), step.energy );
     }   
         println!("-----------------");
         println!("Statistics:");

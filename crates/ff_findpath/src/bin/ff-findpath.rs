@@ -13,12 +13,12 @@ use clap::Parser;
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Args {
-    /// Name of file containing test data
-    #[arg(short, long)]
+    /// Name of file containing input data
+    #[arg(short, long, value_name = "FILENAME",)]
     filename: String,
 
-    /// Search width parameter for findpath (default: 1 = greedy search)
-    #[arg(short, long, default_value = "1")]
+    /// Search width parameter for findpath (default= 1: corresponds to Greedy algorithm)
+    #[arg(short = 'm', long = "search-width", value_name = "SEARCH-WIDTH", default_value = "1")]
     m: usize,
 
 }
@@ -82,14 +82,15 @@ fn main()  -> Result<(), Box<dyn std::error::Error>> {
     let model = ViennaRNA::default();
 
     let (steps, stats) = findpath(&model, seq, struct1, struct2, args.m, None).unwrap();
-    println!("Folding Path:");
+    println!("Folding Path found with findpath algorithm:");
     println!("-----------------");
+    println!("{} \t applied move \t energy", seq);
     for step in steps {
-        println!("{} \t {} \t {} kcal/mol", step.structure,step.move_applied.unwrap_or_default(), step.energy );
+        println!("{} \t {} \t {} kcal/mol", step.structure, step.move_applied.unwrap_or_default(), step.energy );
     }   
-        println!("-----------------");
-        println!("Statistics:");
-        println!("{}", stats);
+    println!("-----------------");
+    println!("Statistics:");
+    println!("{}", stats);
     Ok(())
 
 }

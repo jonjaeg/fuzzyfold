@@ -1,6 +1,7 @@
 // import everything from greedy.rs into lib.rs
 pub use greedy::*;
 pub use utils::*;
+pub use findpath::*;
 
 
 

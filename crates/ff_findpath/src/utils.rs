@@ -204,7 +204,7 @@ impl fmt::Display for PathStats {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "Saddle Energy: {:.2} kcal/mol, Barrier Energy: {:.2} kcal/mol, Start Energy: {:.2} kcal/mol, End Energy: {:.2} kcal/mol",
+            "Saddle energy: {:.2} kcal/mol, Barrier energy: {:.2} kcal/mol, Start energy: {:.2} kcal/mol, End energy: {:.2} kcal/mol",
             self.saddle_energy,
             self.barrier_energy,
             self.start_energy,
@@ -298,6 +298,18 @@ pub fn analyze_folding_path(
 
     (steps, stats)
 }
+
+
+
+
+
+// #####################################
+//                  TESTS
+// #####################################
+
+
+
+
 
 #[cfg(test)]
 mod tests {

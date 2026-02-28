@@ -8,17 +8,17 @@ The program shows which base pair moves (deletion/insertion) are needed to fold 
 Each trajectory is shown as a sequence of structures with applied moves and associated
 energies. The program then gives statistics about the energy barrier along this trajectory. 
 
-## Improvining upon Morgan-Higgs 
+## Improving upon the Morgan-Higgs (greedy) algorithm
 
 The algorithm can be seen as an extension of the idea coined by the Morgan-Higgs
-heuristic. It introduces an additional parameter, the search width `m`, which
+heuristic. It introduces an additional parameter, the **search width** `m`, which
 regulates the search by retaining all `m` best paths for every distance step. The
-**underlying principle** is that optimal direct paths will almost never be the result
+underlying principle is that optimal direct paths will almost never be the result
 of purely greedy decisions, however, often the second or third best move from a
 given intermediate may be sufficient for finding the best possible path. 
 
 Practically, when the search width is set to `m = 1`, the resulting path is computed
-greedily and yields the same outcome `ff-greedy`.
+greedily and yields the same outcome as `ff-greedy`.
 
 ---
 
@@ -39,7 +39,7 @@ AGCCAUGAGUGUAUAGUGGGCCUAU
 You can run the greedy folding algorithm as follows:
 
 ```bash
-ff-findpath -f short.txt -m 10
+ff-findpath -f short.txt -m 100
 ```
 
 The program reads the input file `short.txt` with the command line arguments `-f` and a search width parameter `-m`and  calculates the findpath folding path and corresponding energies. The output is shown on the command line.
