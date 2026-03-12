@@ -1,8 +1,7 @@
 use criterion::{criterion_group, criterion_main, Criterion};
 use std::hint::black_box;
 
-use ff_findpath::greedy::{generate_valid_neighbors};
-use ff_findpath::utils::{compare_structures};
+use ff_findpath::utils::{compare_structures, generate_valid_neighbors};
 use ff_structure::PairTable;
 
 

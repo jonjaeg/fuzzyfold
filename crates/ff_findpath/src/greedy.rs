@@ -29,7 +29,7 @@ pub fn greedy_find_path(
 ) -> Result<(Vec<PathStep>, PathStats), String> {
     
     // 1. Setup & Validation
-    let seq_vec = NucleotideVec::from_lossy(sequence);
+    let seq_vec = NucleotideVec::try_from_rna(sequence).expect("Failed to parse RNA sequence");
     let pt_start = PairTable::try_from(s1).map_err(|_| "Invalid start structure s1")?;
     let pt_target = PairTable::try_from(s2).map_err(|_| "Invalid target structure s2")?;
 
@@ -39,7 +39,7 @@ pub fn greedy_find_path(
     let total_steps = move_list.len();
 
     // 3. Initialize Energies
-    let start_energy = model.energy_of_structure(&seq_vec, &pt_start) as f64 / 100.0;
+    let start_energy = model.energy_of_structure(&seq_vec, &pt_start).expect("failed to calculate starting energy") as f64 / 100.0;
     
     // 4. Initialize Trajectory
     let mut trajectory = Vec::with_capacity(total_steps + 1);

@@ -6,20 +6,13 @@ mod dotbracket;
 mod pair_table;
 mod multi_pair_table;
 mod loop_table;
-<<<<<<< HEAD
-mod hamming_distance;
-=======
 mod pair_set;
->>>>>>> main
 
 pub use error::*;
 pub use dotbracket::*;
 pub use pair_table::*;
 pub use multi_pair_table::*;
 pub use loop_table::*;
-<<<<<<< HEAD
-pub use hamming_distance::*;
-=======
 pub use pair_set::*;
 
 
@@ -37,5 +30,4 @@ const _: () = {
     debug_assert!(2 * NAIDX::BITS <= P1KEY::BITS);
 };
 
->>>>>>> main
 

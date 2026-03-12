@@ -1,23 +1,16 @@
 //! PairTable construction and helper traits.
 
-use std::ops::{Deref, DerefMut};
+use std::ops::{Deref, DerefMut, Index, IndexMut};
 use std::convert::TryFrom;
 use crate::NAIDX;
 use crate::StructureError;
 use crate::{DotBracket, DotBracketVec};
 use std::fmt;
 
-<<<<<<< HEAD
-
-
-#[derive(Hash, Debug, Clone, PartialEq, Eq)]
-pub struct PairTable(pub Vec<Option<usize>>);
-=======
 /// As of v0.1.3 the PairTable field is private. A pair-table should
 /// be constructed by From or TryFrom traits, but then be save to use.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct PairTable(Vec<Option<NAIDX>>);
->>>>>>> main
 
 impl PairTable {
     /// Check if the substructure from `i..j` is well-formed:
@@ -26,7 +19,7 @@ impl PairTable {
         assert!(j <= self.len(), "Invalid interval: j must be <= length");
 
         for k in i..j {
-            if let Some(l) = self[k] {
+            if let Some(l) = self[k as u16] {
                 let ul = l as usize;
                 if ul < i || ul >= j {
                     return false; // points outside
@@ -34,6 +27,39 @@ impl PairTable {
             }
         }
         true
+    }
+}
+
+// implement indexing for u16, since that's the natural index type for NAIDX. The internal implementation still uses usize, so we just cast under the hood. This way, users can use u16 indexing without worrying about the internal representation.
+impl Index<u16> for PairTable {
+    type Output = Option<u16>;
+
+    fn index(&self, index: u16) -> &Self::Output {
+        // We cast to usize here under the hood, so you never 
+        // have to think about it again when using the struct.
+        &self.0[index as usize]
+    }
+}
+
+impl IndexMut<u16> for PairTable {
+    fn index_mut(&mut self, index: u16) -> &mut Self::Output {
+        // We return a mutable reference (&mut) to the inner item
+        &mut self.0[index as usize]
+    }
+}
+// implement the same traits for usize, for convenience. The internal implementation still uses usize, so this is just a thin wrapper.
+impl Index<usize> for PairTable {
+    type Output = Option<u16>;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.0[index]
+    }
+}
+
+// And the mutable version
+impl IndexMut<usize> for PairTable {
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+        &mut self.0[index]
     }
 }
 
@@ -132,12 +158,12 @@ mod tests {
     fn test_valid_pair_table() {
         let pt = PairTable::try_from("((..))").unwrap();
         assert_eq!(pt.len(), 6);
-        assert_eq!(pt[0], Some(5));
-        assert_eq!(pt[1], Some(4));
-        assert_eq!(pt[2], None);
-        assert_eq!(pt[3], None);
-        assert_eq!(pt[4], Some(1));
-        assert_eq!(pt[5], Some(0));
+        assert_eq!(pt[0 as u16], Some(5));
+        assert_eq!(pt[1 as u16], Some(4));
+        assert_eq!(pt[2 as u16], None);
+        assert_eq!(pt[3 as u16], None);
+        assert_eq!(pt[4 as u16], Some(1));
+        assert_eq!(pt[5 as u16], Some(0));
     }
 
     #[test]

@@ -1,6 +1,6 @@
 use std::fmt;
 use ff_energy::{NucleotideVec, ViennaRNA, EnergyModel}; 
-use ff_structure::{DotBracketVec, PairTable, LoopTable, LoopInfo,};
+use ff_structure::{LoopInfo, LoopTable, NAIDX, PairTable};
 
 /// Corresponds to an elementary move in the transformation from two RNA structures.
 ///
@@ -29,8 +29,8 @@ use ff_structure::{DotBracketVec, PairTable, LoopTable, LoopInfo,};
 // Derive Default, makes default Move { i: 0, j: 0, is_insertion: false } (del (0,0) at start of every path)
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
 pub struct Move {
-    pub i: usize,
-    pub j: usize,
+    pub i: NAIDX,
+    pub j: NAIDX,
     pub is_insertion: bool, // true = insert, false = delete
 }
 
@@ -172,7 +172,7 @@ pub fn compare_structures(pt1: &PairTable, pt2: &PairTable) -> StructureDifferen
         bp_distance: 0,
     };
 
-    let length = pt1.len();
+    let length = pt1.len(); // Both structures should have the same length, we can check this in the caller function if needed
 
     // Iterate through all bases
     for i in 0..length {
@@ -183,10 +183,10 @@ pub fn compare_structures(pt1: &PairTable, pt2: &PairTable) -> StructureDifferen
             // logic: if pt1 has a pair (i, j) starting at i
             if let Some(j) = pt1[i] {
                 // Ensure we only process the pair once (at the opening bracket, where i < j)
-                if i < j {
+                if i < j as usize {
                     let deletion_move = Move {
-                        i,
-                        j,
+                        i: i as NAIDX,
+                        j: j as NAIDX,
                         is_insertion: false,
                     };
 
@@ -199,10 +199,10 @@ pub fn compare_structures(pt1: &PairTable, pt2: &PairTable) -> StructureDifferen
             // logic: if pt2 has a pair (i, j) starting at i
             if let Some(j) = pt2[i] {
                 // Ensure we only process the pair once (at the opening bracket)
-                if i < j {
+                if i < j as usize {
                     let insertion_move = Move {
-                        i,
-                        j,
+                        i: i as NAIDX,
+                        j: j as NAIDX,
                         is_insertion: true,
                     };
 
@@ -287,7 +287,7 @@ pub fn generate_valid_neighbors(
         // --- VALIDITY CHECKS (Topology) ---
         if candidate_move.is_insertion {
             // Check for pseudoknots: i and j must be in the same loop context
-            match (&loop_table[i], &loop_table[j]) {
+            match (&loop_table[i as usize], &loop_table[j as usize]) {
                 (LoopInfo::Unpaired { l: l1 }, LoopInfo::Unpaired { l: l2 }) => {
                     if l1 != l2 { continue; } // Different loops = crossing = invalid
                 },
@@ -295,17 +295,17 @@ pub fn generate_valid_neighbors(
             }
         } else {
             // Deletion: The pair must actually exist
-            if current_pt[i] != Some(j) { continue; }
+            if current_pt[i as usize] != Some(j) { continue; }
         }
 
         // --- APPLY MOVE ---
         let mut new_pt = current_pt.clone();
         if candidate_move.is_insertion {
-            new_pt[i] = Some(j);
-            new_pt[j] = Some(i);
+            new_pt[i as usize] = Some(j);
+            new_pt[j as usize] = Some(i);
         } else {
-            new_pt[i] = None;
-            new_pt[j] = None;
+            new_pt[i as usize] = None;
+            new_pt[j as usize] = None;
         }
 
         candidates.push(NeighborCandidate {
@@ -347,7 +347,7 @@ pub fn apply_move(
 
     for cand in candidates {
         // 2. Calculate Energy (Expensive)
-        let en = model.energy_of_structure(seq_vec, &cand.pt) as f64 / 100.0;
+        let en = model.energy_of_structure(seq_vec, &cand.pt).expect("failed to calculate Energy") as f64 / 100.0;
         
 
         // NOT USED IN GREEDY as we always explore all moves and pick the best
@@ -399,7 +399,7 @@ mod tests {
     // This warning happens because PairTable is only used inside your tests module.
     // When you run cargo build (or when Rust Analyzer checks your code), 
     // the #[cfg(test)] module is ignored/stripped out. This leaves the import use ff_structure::PairTable; sitting at the top level with no one using it, hence the "unused import" warning.
-    
+    use ff_structure::DotBracketVec; 
     use ff_structure::PairTable;
     // use structs defined above (parent module), because tests is a submodule of the module where the structs are defined
     use super::*;
@@ -408,12 +408,12 @@ mod tests {
     fn test_valid_pair_table() {
         let pt = PairTable::try_from("((..))").unwrap();
         assert_eq!(pt.len(), 6);
-        assert_eq!(pt[0], Some(5));
-        assert_eq!(pt[1], Some(4));
-        assert_eq!(pt[2], None);
-        assert_eq!(pt[3], None);
-        assert_eq!(pt[4], Some(1));
-        assert_eq!(pt[5], Some(0));
+        assert_eq!(pt[0 as usize], Some(5));
+        assert_eq!(pt[1 as usize], Some(4));
+        assert_eq!(pt[2 as usize], None);
+        assert_eq!(pt[3 as usize], None);
+        assert_eq!(pt[4 as usize], Some(1));
+        assert_eq!(pt[5 as usize], Some(0));
     }
 
     #[test]
@@ -461,12 +461,12 @@ mod tests {
         let seq1 = "AGCCAUGAGUGUAUAGUGGGCCUAU";
         let struct1 = ".(((..............)))....";
         let expected_energy = -2.2;
-        assert_eq!(model.energy_of_structure(&NucleotideVec::from_lossy(seq1), &PairTable::try_from(struct1).expect("valid")) as f64/100., expected_energy);
+        assert_eq!(model.energy_of_structure(&NucleotideVec::try_from_rna(seq1).expect("failed to read RNA sequence"), &PairTable::try_from(struct1).expect("valid")).expect("failed to calculate energy") as f64/100.0, expected_energy);
         
         let seq = "UCUACUAUUCCGGCUUGACAUAAAUAUCGAGUGCUCGACC";
         let dbr = "...........(.(((((........)))))..)......";
         let exp_energy = -210;
-        assert_eq!(model.energy_of_structure(&NucleotideVec::from_lossy(seq), &PairTable::try_from(dbr).expect("valid")), exp_energy);
+        assert_eq!(model.energy_of_structure(&NucleotideVec::try_from_rna(seq).expect("failed to read RNA sequence"), &PairTable::try_from(dbr).expect("valid")).expect("failed to calculate energy"), exp_energy);
         
     }
 
@@ -511,7 +511,7 @@ fn test_generate_valid_neighbors_02() {
     assert_eq!(neighbors.len(), 2, "Both moves should be valid on empty structure");
     // Verify the structures in the neighbors
     // Neighbor 0 should have 0-3 paired
-    assert_eq!(neighbors[0].pt[0], Some(3));
+    assert_eq!(neighbors[0].pt[0 as usize], Some(3));
 
 }
 
@@ -569,7 +569,7 @@ fn test_generate_valid_neighbors_02() {
 
 
         // 1. Setup & Validation
-        let seq_vec = NucleotideVec::from_lossy(seq1);
+        let seq_vec = NucleotideVec::try_from_rna(seq1).expect("failed to read RNA sequence");
         let pt_start = PairTable::try_from(str1).unwrap();
         let pt_target = PairTable::try_from(str2).unwrap();
 
@@ -579,7 +579,8 @@ fn test_generate_valid_neighbors_02() {
         
 
         // 3. Initialize Energies
-        let start_energy = model.energy_of_structure(&seq_vec, &pt_start) as f64 / 100.0;
+        let start_energy = model.energy_of_structure(&seq_vec, &pt_start).expect("failed to calculate energy ") as f64 / 100.0;
+
 
 
         // Initialize Intermediate

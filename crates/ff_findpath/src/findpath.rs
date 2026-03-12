@@ -73,7 +73,8 @@ pub fn findpath(
 ) -> Result<(Vec<PathStep>, PathStats), String> {
     
     // 1. Setup & Pre-calculation (Done ONCE)
-    let seq_vec = NucleotideVec::from_lossy(sequence);
+    let seq_vec = NucleotideVec::try_from_rna(sequence)
+        .expect("Failed to parse RNA sequence");
     
     let pt_start = PairTable::try_from(s1).map_err(|_| "Invalid start structure s1")?;
     let pt_target = PairTable::try_from(s2).map_err(|_| "Invalid target structure s2")?;
@@ -199,7 +200,7 @@ pub fn run_beam_pass(
 ) -> Result<(Vec<PathStep>, PathStats), String> {
 
     let total_steps = initial_moves.len();
-    let start_energy = model.energy_of_structure(seq_vec, start_pt) as f64 / 100.0;
+    let start_energy = model.energy_of_structure(seq_vec, start_pt).expect("Failed to calculate starting energy") as f64 / 100.0;
 
     // Check if the start structure already violates max_energy
     if let Some(max_e) = max_energy {
@@ -294,7 +295,7 @@ pub fn reconstruct_path_from_moves(
     
     let mut trajectory = Vec::with_capacity(moves.len() + 1);
     let mut pt = start_pt.clone();
-    let start_en = model.energy_of_structure(seq_vec, &pt) as f64 / 100.0;
+    let start_en = model.energy_of_structure(seq_vec, &pt).expect("Failed to calculate starting energy") as f64 / 100.0;
 
     trajectory.push(PathStep {
         structure: DotBracketVec::try_from(&pt).unwrap().to_string(), 
@@ -308,15 +309,15 @@ pub fn reconstruct_path_from_moves(
     for (i, mv) in moves.iter().enumerate() {
         // Apply move logic
         if mv.is_insertion {
-            pt[mv.i] = Some(mv.j);
-            pt[mv.j] = Some(mv.i);
+            pt[mv.i] = Some(mv.j as u16);
+            pt[mv.j] = Some(mv.i as u16);
         } else {
             pt[mv.i] = None;
             pt[mv.j] = None;
         }
 
         // Calculate and track energy
-        let en = model.energy_of_structure(seq_vec, &pt) as f64 / 100.0;
+        let en = model.energy_of_structure(seq_vec, &pt).expect("Failed to calculate energy") as f64 / 100.0;
         if en > saddle { saddle = en; }
 
         trajectory.push(PathStep {

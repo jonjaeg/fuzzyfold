@@ -33,10 +33,6 @@ path = "src/bin/ff-timecourse.rs"
 name = "ff-trajectory"
 path = "src/bin/ff-trajectory.rs"
 
-[[bin]]
-name = "ff-hamming-distance"
-path = "src/bin/ff-hamming-distance.rs"
-
 [dependencies]
 ff_structure.workspace = true
 ff_energy.workspace = true
