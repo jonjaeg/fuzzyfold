@@ -1,18 +1,35 @@
 use clap::Args;
-use anyhow::Result;
 use anyhow::bail;
+use anyhow::Result;
+use ff_kinetics::Arrhenius;
 
 #[derive(Debug, Args)]
-pub struct RateModelParams {
-    /// Metropolis rate constant (must be > 0).
-    #[arg(long, default_value_t = 1e6)]
+pub struct RateModelArguments {
+    /// Rate constant for add/delete moves.
+    #[arg(long, default_value_t = 1e5)]
     pub k0: f64,
+
+    /// Rate constant for three-way shift moves (optional, default = off).
+    #[arg(long)]
+    pub k3ws: Option<f64>,
+
+    /// Rate constant for four-way shift moves (optional, default = off).
+    #[arg(long)]
+    pub k4ws: Option<f64>,
 }
+
+impl RateModelArguments {
+    /// Validate that all parameters make sense.
+    pub fn build_model(&self, celsius: f64) -> Arrhenius {
+        Arrhenius::new(celsius, self.k0, self.k3ws, self.k4ws)
+    }
+}
+
 
 #[derive(Debug, Args)]
 pub struct TimelineParameters {
     /// The last time point of the linear scale.
-    #[arg(long, default_value_t = 1e-5)]
+    #[arg(long, default_value_t = 0.04)]
     pub t_ext: f64,
 
     /// Simulation stop time.
@@ -20,11 +37,11 @@ pub struct TimelineParameters {
     pub t_end: f64,
 
     /// Number of time points on the linear scale: [0..t-ext]
-    #[arg(long, default_value_t = 1)]
+    #[arg(long, default_value_t = 100)]
     pub t_lin: usize,
 
     /// Number of time points on the logarithmic scale: [t-ext..t-end]
-    #[arg(long, default_value_t = 20)]
+    #[arg(long, default_value_t = 100)]
     pub t_log: usize,
 }
 

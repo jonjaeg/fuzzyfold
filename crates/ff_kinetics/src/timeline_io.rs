@@ -3,6 +3,7 @@ use std::result;
 use std::sync::Arc;
 use serde::{Serialize, Deserialize};
 
+use ff_energy::EnergyModel;
 use crate::timeline::Timeline;
 use crate::timeline::TimelineError;
 use crate::macrostates::MacrostateRegistry;
@@ -19,13 +20,13 @@ pub struct SerializableTimePoint {
     counter: usize,
 }
 
-impl Timeline {
+impl<'a, E: EnergyModel> Timeline<'a, E> {
     pub fn to_serializable(&self) -> SerializableTimeline {
         SerializableTimeline {
             points: self.points.iter().map(|tp| {
                 let ensemble = tp.ensemble.iter()
                     .map(|(id, count)| {
-                        let name = self.registry.get(*id).name().to_string();
+                        let name = self.registry.macrostates()[*id].name().to_string();
                         (name, *count)
                     })
                     .collect();
@@ -42,7 +43,7 @@ impl Timeline {
     pub fn from_file<P: AsRef<std::path::Path>>(
         path: P,
         times: &[f64],
-        registry: Arc<MacrostateRegistry>,
+        registry: Arc<MacrostateRegistry<'a, E>>,
     ) -> result::Result<Self, TimelineError> {
         let data = fs::read_to_string(path)?;
         let serial: SerializableTimeline = serde_json::from_str(&data)?;

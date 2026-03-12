@@ -1,14 +1,13 @@
-use std::convert::TryFrom;
 use std::fmt;
 use std::ops::Deref;
 
-use crate::StructureError;
+use crate::NAIDX;
 use crate::PairTable;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LoopInfo {
-    Unpaired { l: usize },
-    Paired { o: usize, i: usize }, // outer, inner loop ids
+    Unpaired { l: NAIDX },
+    Paired { o: NAIDX, i: NAIDX }, // outer, inner loop ids
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -22,48 +21,37 @@ impl Deref for LoopTable {
     }
 }
 
-impl TryFrom<&PairTable> for LoopTable {
-    type Error = StructureError;
-
-    fn try_from(pt: &PairTable) -> Result<Self, Self::Error> {
+impl From<&PairTable> for LoopTable {
+    fn from(pt: &PairTable) -> Self {
         let n = pt.len();
         let mut table = vec![LoopInfo::Unpaired { l: 0 }; n];
-        let mut loop_index = 0;
-        let mut stack: Vec<(usize, usize)> = Vec::new(); // (closing_idx, loop_id)
-        let mut mloop = 0;
+        let mut loop_index: NAIDX = 0;
+        let mut mloop: NAIDX = 0;
 
+        let mut stack: Vec<(usize, NAIDX)> = Vec::new(); // (closing_idx, loop_id)
         for i in 0..n {
             match pt[i] {
                 None => {
                     table[i] = LoopInfo::Unpaired { l: loop_index };
                 }
-                Some(j) if j > i => {
+                Some(j) if (j as usize) > i => {
                     let outer_loop = loop_index;
                     mloop += 1;
                     loop_index = mloop;
                     table[i] = LoopInfo::Paired { o: outer_loop, i: loop_index };
-                    stack.push((j, loop_index));
+                    stack.push((j as usize, loop_index));
                 }
-                Some(j) if j < i => {
-                    if let Some((_, inner_loop)) = stack.pop() {
-                        loop_index = stack.last().map(|&(_, l)| l).unwrap_or(0);
-                        table[i] = LoopInfo::Paired { o: loop_index, i: inner_loop };
-                    } else {
-                        return Err(StructureError::UnmatchedClose(i));
-                    }
-                }
-                Some(j) if j == i => {
-                    return Err(StructureError::InvalidToken(format!("self-pairing '{}'", i), "pair table".to_string(), i));
+                Some(j) if (j as usize) < i => {
+                    let (_, inner_loop) = stack.pop().expect("Expected well formed PairTable, missig opening pair index!");
+                    loop_index = stack.last().map(|&(_, l)| l).unwrap_or(0);
+                    table[i] = LoopInfo::Paired { o: loop_index, i: inner_loop };
                 }
                 _ => unreachable!(),
             }
         }
-
-        if let Some((unclosed, _)) = stack.last() {
-            return Err(StructureError::UnmatchedOpen(*unclosed));
-        }
-
-        Ok(LoopTable(table))
+        debug_assert!(stack.is_empty(),
+            "Expected well-formed PairTable, missing closing pair index.");
+        LoopTable(table)
     }
 }
 
@@ -89,7 +77,7 @@ mod tests {
     fn test_loop_table_valid_structure() {
         // dot-bracket: ((..))
         let pt = PairTable::try_from("((..))").unwrap();
-        let lt = LoopTable::try_from(&pt).unwrap();
+        let lt = LoopTable::from(&pt);
 
         // Expecting:
         // positions: 0 1 2 3 4 5
@@ -110,7 +98,7 @@ mod tests {
     #[test]
     fn test_loop_table_unpaired_structure() {
         let pt = PairTable::try_from("......").unwrap();
-        let lt = LoopTable::try_from(&pt).unwrap();
+        let lt = LoopTable::from(&pt);
 
         for info in lt.iter() {
             assert!(matches!(info, LoopInfo::Unpaired { .. }));
@@ -118,26 +106,18 @@ mod tests {
     }
 
     #[test]
-    fn test_loop_table_self_pairing_fails() {
-        let pt = PairTable(vec![Some(0)]);
-        let err = LoopTable::try_from(&pt).unwrap_err();
-        assert!(matches!(err, StructureError::InvalidToken( .. )));
-    }
-
-    #[test]
-    fn test_loop_table_unmatched_open_detected_in_loop_table() {
-        // manually constructed bad PairTable with unmatched open
-        let pt = PairTable(vec![Some(5), Some(4), None, None, Some(1), None]);
-        let err = LoopTable::try_from(&pt).unwrap_err();
-        assert!(matches!(err, StructureError::UnmatchedOpen(5)));
+    fn test_loop_table_self_pairing_panics() {
+        let pt = PairTable::try_from(".").unwrap();
+        let lt = LoopTable::from(&pt);
+        assert_eq!(lt.len(), 1);
+        assert!(matches!(lt[0], LoopInfo::Unpaired { .. }));
     }
 
     #[test]
     fn test_deref_loop_table_len_indexing() {
         let pt = PairTable::try_from("((..))").unwrap();
-        let lt = LoopTable::try_from(&pt).unwrap();
+        let lt = LoopTable::from(&pt);
 
-        // test Deref
         assert_eq!(lt.len(), 6);
         assert!(matches!(lt[2], LoopInfo::Unpaired { .. }));
     }
@@ -161,7 +141,7 @@ mod tests {
             Unpaired { l: 7 }, Unpaired { l: 7 }, Unpaired { l: 7 }, 
             Paired { o: 6, i: 7 }, Paired { o: 1, i: 6 }, Paired { o: 0, i: 1 }
         ]);
-        let re = LoopTable::try_from(&pt).unwrap();
+        let re = LoopTable::from(&pt);
         assert_eq!(re, li); 
     }
 
@@ -200,8 +180,7 @@ mod tests {
                        Unpaired { l: 0 }
         ]);
 
-        let re = LoopTable::try_from(&pt).unwrap();
-        println!("{:?}", re);
+        let re = LoopTable::from(&pt);
         assert_eq!(re, li); 
     }
 
@@ -224,11 +203,9 @@ mod tests {
                        Unpaired { l: 6 }, Paired { o: 5, i: 6 }, Paired { o: 0, i: 5 }, 
                        Unpaired { l: 0 }
         ]);
-        let re = LoopTable::try_from(&pt).unwrap();
-        println!("{:?}", re);
+        let re = LoopTable::from(&pt);
         assert_eq!(re, li); 
     }
-
 
     #[test]
     fn test_loop_table_display() {
@@ -247,5 +224,4 @@ mod tests {
         assert_eq!(formatted, "[0, 0/1, 1/2, 2, 1/2, 0/1]");
     }
 }
-
 

@@ -1,6 +1,7 @@
 use std::fmt;
 use std::sync::Arc;
 use std::error::Error;
+use ff_energy::EnergyModel;
 use nohash_hasher::IntMap;
 use ff_structure::DotBracketVec; 
 
@@ -98,18 +99,17 @@ impl Timepoint {
 
 }
 
-#[derive(Debug)]
-pub struct Timeline {
+pub struct Timeline<'a, E: EnergyModel> {
     /// Registry of all macrostates (used to classify structures)
-    pub registry: Arc<MacrostateRegistry>,
+    pub registry: Arc<MacrostateRegistry<'a, E>>,
 
     /// One `Timepoint` per output time in the simulation
     pub points: Vec<Timepoint>,
 }
 
-impl Timeline {
+impl<'a, E: EnergyModel> Timeline<'a, E> {
     /// Build a new empty timeline for given times and an existing macrostate registry.
-    pub fn new(times: &[f64], registry: Arc<MacrostateRegistry>) -> Self {
+    pub fn new(times: &[f64], registry: Arc<MacrostateRegistry<'a, E>>) -> Self {
         let points = times.iter().map(|&t| Timepoint::new(t)).collect();
         Self { registry, points }
     }
@@ -131,7 +131,7 @@ impl Timeline {
         self.points.iter().enumerate()
     }
 
-    pub fn merge(&mut self, other: Timeline) {
+    pub fn merge(&mut self, other: Timeline<'a, E>) {
         assert!(
             Arc::ptr_eq(&self.registry, &other.registry),
             "Cannot merge timelines with different registries"
@@ -148,7 +148,7 @@ impl Timeline {
     }
 }
 
-impl fmt::Display for Timeline {
+impl<'a, E: EnergyModel> fmt::Display for Timeline<'a, E> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // DRF header
         writeln!(f, "{:>13} {:>5} {:>12} {:>10} {:>25}", "time", "id", "occupancy", "energy", "macrostate")?;
@@ -161,22 +161,17 @@ impl fmt::Display for Timeline {
 
             // Sort by energy, None last
             entries.sort_by(|(a_idx, _), (b_idx, _)| {
-                let e_a = self.registry.get(*a_idx).energy();
-                let e_b = self.registry.get(*b_idx).energy(); 
-                match (e_a, e_b) {
-                    (Some(a), Some(b)) => a.partial_cmp(&b).unwrap_or(std::cmp::Ordering::Equal),
-                    (Some(_), None) => std::cmp::Ordering::Less,
-                    (None, Some(_)) => std::cmp::Ordering::Greater,
-                    (None, None) => std::cmp::Ordering::Equal,
-                }
+                let e_a = self.registry.macrostates()[*a_idx].ensemble_energy();
+                let e_b = self.registry.macrostates()[*b_idx].ensemble_energy(); 
+                e_a.partial_cmp(&e_b).unwrap_or(std::cmp::Ordering::Equal)
             });
 
             // Sort ensemble by energy (you could make this configurable)
             for (m_idx, count) in entries {
                 let occu = count as f64 / total as f64;
 
-                let name = self.registry.get(m_idx).name();
-                let energy = self.registry.get(m_idx).energy();
+                let name = self.registry.macrostates()[m_idx].name();
+                let energy = self.registry.macrostates()[m_idx].ensemble_energy().unwrap_or(0.0);
 
                 writeln!(
                     f,
@@ -184,7 +179,7 @@ impl fmt::Display for Timeline {
                     time,
                     m_idx,
                     occu,
-                    energy.map_or("N/A".to_string(), |e| format!("{:10.2}", e)),
+                    format!("{:10.2}", energy),
                     name,
                 )?;
             }

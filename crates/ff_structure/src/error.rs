@@ -1,13 +1,17 @@
+//! Errors for ff_structure. 
+//!
+//! NOTE: We communticte errors based on usize indexing, because error typically
+//! occur when we have to cast between u16 <-> usize anyway.
+
 use std::fmt;
 
 #[derive(Debug)]
 pub enum StructureError {
-    UnmatchedOpen(usize),          // '(' at this position was never closed
-    UnmatchedMultiOpen((usize, usize)),          // '(' at this position was never closed
-    UnmatchedClose(usize),         // ')' at this position has no matching '('
-    UnmatchedMultiClose((usize, usize)),          // '(' at this position was never closed
-    InvalidToken(String, String, usize),   // invalid char and position
-    InvalidPairTable(usize),   // invalid char and position
+    InvalidToken(String, String, usize),
+    UnmatchedOpen(usize),
+    UnmatchedClose(usize),
+    UnmatchedMultiOpen((usize, usize)),
+    UnmatchedMultiClose((usize, usize)),
 }
 
 impl fmt::Display for StructureError {
@@ -27,9 +31,6 @@ impl fmt::Display for StructureError {
             }
             StructureError::InvalidToken(tok, src, i) => {
                 write!(f, "Invalid {} in {} at position {}", tok, src, i)
-            }
-            StructureError::InvalidPairTable(i) => {
-                write!(f, "Invalid entry at pair table position {}", i)
             }
         }
     }

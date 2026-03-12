@@ -1,14 +1,12 @@
 use std::io::{stdin, Write, BufRead};
-use log::{debug};
 use env_logger::Builder;
 use clap::{Parser, Args, ArgAction};
 use anyhow::Result;
 use anyhow::anyhow;
 
-use ff_energy::ViennaRNA;
 use ff_energy::EnergyModel;
 use ff_energy::NucleotideVec;
-use ff_structure::PairTable;
+use fuzzyfold::structure::MultiPairTable;
 use ff_structure::DotBracketVec;
 use fuzzyfold::energy_parsers::EnergyModelArguments;
 
@@ -55,13 +53,8 @@ fn init_logging(verbosity: u8) {
 fn main() -> Result<()> {
     let cli = Cli::parse();
     init_logging(cli.eval.verbose);
-    let param_file = cli.energy.param_file();
 
-    debug!("Using parameter file: {:?}", param_file);
-    debug!("Temperature: {} °C", cli.energy.temperature);
-    let mut model = ViennaRNA::from_parameter_file(param_file)?;
-    model.set_temperature(cli.energy.temperature);
-
+    let model = cli.energy.build_model();
 
     let mut lines = stdin().lock().lines();
 
@@ -70,7 +63,7 @@ fn main() -> Result<()> {
 
     let mut parts = first.split_whitespace();
     let token = parts.next().ok_or_else(|| anyhow!("Missing sequence"))?;
-    let sequence = NucleotideVec::from_lossy(token);
+    let sequence = NucleotideVec::try_from(token)?;
     let _: Vec<f64> = parts.map(|s| s.parse().unwrap()).collect();
     println!("{}", sequence);
 
@@ -83,11 +76,11 @@ fn main() -> Result<()> {
         let structure = DotBracketVec::try_from(token)?;
         let ref_en: f64 = parts.next().ok_or_else(|| anyhow!("Missing energy"))?.parse()?;
 
-        let pairings = PairTable::try_from(&structure)?;
-        let energy = model.energy_of_structure(&sequence, &pairings);
+        let pairings = MultiPairTable::try_from(&structure)?;
+        let energy = model.energy_of_structure(&sequence, &pairings).unwrap();
 
         let mark = if (ref_en * 100f64).round() as i32 != energy { "*" } else { "" };
-        if true || mark == "*" {
+        if mark == "*" {
             println!("{} {:6.2} {:6.2} {}", structure, energy as f64 / 100.0, ref_en, mark);
         }
     }
