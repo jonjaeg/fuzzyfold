@@ -16,6 +16,8 @@ use crate::nn_parsing::ParamError;
 use crate::EnergyModel;
 use crate::K0;
 
+use ff_structure::PairTable;
+
 /// The default ViennaRNA-v2.6 energy model.
 ///
 /// The current implementation allows different
@@ -303,7 +305,42 @@ impl ViennaRNA {
         en
     }
 
+/// A potential helper function to evaluate the energy of a base-pair move.
+    fn energy_of_pair(&self, 
+        sequence: &[Base], 
+        structure: &PairTable, 
+        i: usize,
+        j: usize
+    ) -> i32 {
+        let inner = structure.loop_enclosed_by(Some((i, j)));
+        let epair = structure.get_enclosing_pair(i, j);
+
+        if let (Some(pi), Some(pj)) = (structure[i], structure[j]) {
+            assert!(j == pi && i == pj);
+            let outer = structure.loop_enclosed_by(epair);
+            let mut pt = structure.clone();
+            pt[i] = None;
+            pt[j] = None;
+            let combo = pt.loop_enclosed_by(epair);
+
+            let en_paired = self.energy_of_loop(sequence, &inner) + self.energy_of_loop(sequence, &outer);
+            let en_absent = self.energy_of_loop(sequence, &combo);
+            return en_absent - en_paired
+        } else {
+            assert!(structure[i] == structure[j]);
+            let combo = structure.loop_enclosed_by(epair);
+            let mut pt = structure.clone();
+            pt[i] = Some(j);
+            pt[j] = Some(i);
+            let outer = pt.loop_enclosed_by(epair);
+            let en_paired = self.energy_of_loop(sequence, &inner) + self.energy_of_loop(sequence, &outer);
+            let en_absent = self.energy_of_loop(sequence, &combo);
+            return en_paired - en_absent 
+        }
+    }
+
 }
+
 
 impl EnergyModel for ViennaRNA {
  

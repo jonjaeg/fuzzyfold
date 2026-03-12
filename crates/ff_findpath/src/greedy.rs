@@ -19,6 +19,7 @@ use ff_structure::{PairTable, DotBracketVec};
 /// # Internal calls:
 /// - `compare_structures()`: This function compares the starting and target structures to generate a list of moves that can transform one structure into the other. This is done once at the beginning to prepare the move lists for both directions.
 /// - `apply_move()`: This function generates neighboring structures by applying the allowed moves to the current structure, while also calculating their energies
+/// 
 /// NOTE: the `max_energy` parameter is not used in greedy search, as it is a greedy algorithm that explores all valid neighbors and picks the best one.
 pub fn greedy_find_path(
     model: &ViennaRNA,
