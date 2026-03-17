@@ -240,6 +240,7 @@ pub fn compare_structures(pt1: &PairTable, pt2: &PairTable) -> StructureDifferen
 /// - `pt1`: The first structure represented as a PairTable. This is the structure from which we want to transform.
 /// - `pt2`: The second structure represented as a PairTable. This is the structure to which we want to transform.
 /// 
+#[allow(dead_code)]
 fn prepare_moves(pt_1: &PairTable, pt_2: &PairTable) -> Vec<Move> {
     // compare_structures returns StructureDifference { move_list, bp_distance }
     // We only want the move_list 
