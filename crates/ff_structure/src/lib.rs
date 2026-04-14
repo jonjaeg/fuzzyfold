@@ -4,6 +4,8 @@ mod pair_table;
 mod multi_pair_table;
 mod loop_table;
 mod pair_set;
+mod extended_dot_bracket;
+pub mod arc_diagram;
 
 pub use error::*;
 pub use dotbracket::*;
@@ -11,6 +13,9 @@ pub use pair_table::*;
 pub use multi_pair_table::*;
 pub use loop_table::*;
 pub use pair_set::*;
+pub use arc_diagram::*;
+pub use extended_dot_bracket::*;
+
 
 
 /// Nucleic Acid Index: we use `u16` (0 to 65k), which is plenty for nucleic acids.

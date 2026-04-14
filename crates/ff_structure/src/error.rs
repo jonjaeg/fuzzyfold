@@ -1,6 +1,6 @@
 //! Errors for ff_structure. 
 //!
-//! NOTE: We communticte errors based on usize indexing, because error typically
+//! NOTE: We communicate errors based on usize indexing, because error typically
 //! occur when we have to cast between u16 <-> usize anyway.
 
 use std::fmt;

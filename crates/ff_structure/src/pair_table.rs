@@ -5,6 +5,7 @@ use std::convert::TryFrom;
 use crate::NAIDX;
 use crate::StructureError;
 use crate::{DotBracket, DotBracketVec};
+use crate::{ExtendedDotBracket, BracketKind}; 
 
 /// As of v0.1.3 the PairTable field is private. A pair-table should
 /// be constructed by From or TryFrom traits, but then be save to use.
@@ -75,7 +76,7 @@ impl IndexMut<usize> for PairTable {
         &mut self.0[index]
     }
 }
-
+/*/
 impl TryFrom<&str> for PairTable {
     type Error = StructureError;
 
@@ -99,6 +100,47 @@ impl TryFrom<&str> for PairTable {
         if let Some(i) = stack.pop() {
             return Err(StructureError::UnmatchedOpen(i));
         }
+        Ok(PairTable(table))
+    }
+}
+*/
+
+impl TryFrom<&str> for PairTable {
+    type Error = StructureError;
+
+    fn try_from(s: &str) -> Result<Self, Self::Error> {
+        let mut stacks: std::collections::HashMap<BracketKind, Vec<usize>> =
+            std::collections::HashMap::new();
+        let mut table = vec![None; s.len()];
+
+        for (i, c) in s.chars().enumerate() {
+            match ExtendedDotBracket::try_from(c).map_err(|e| match e {
+                StructureError::InvalidToken(tok, src, _) =>
+                    StructureError::InvalidToken(tok, src, i),
+                e => e,
+            })? {
+                ExtendedDotBracket::Unpaired | ExtendedDotBracket::Break => {}
+                ExtendedDotBracket::Open(kind) => {
+                    stacks.entry(kind).or_default().push(i);
+                }
+                ExtendedDotBracket::Close(kind) => {
+                    let j = stacks.entry(kind).or_default()
+                        .pop()
+                        .ok_or(StructureError::UnmatchedClose(i))?;
+                    table[i] = Some(j as NAIDX);
+                    table[j] = Some(i as NAIDX);
+                }
+            }
+        }
+
+        for kind in BracketKind::all() {
+            if let Some(stack) = stacks.get(kind) {
+                if let Some(&i) = stack.first() {
+                    return Err(StructureError::UnmatchedOpen(i));
+                }
+            }
+        }
+
         Ok(PairTable(table))
     }
 }
@@ -163,7 +205,7 @@ mod tests {
     #[test]
     fn test_invalid_token() {
         let err = PairTable::try_from("(x)").unwrap_err();
-        assert_eq!(format!("{}", err), "Invalid character 'x' in structure at position 1");
+        assert_eq!(format!("{}", err), "Invalid character 'x' in extended dot-bracket at position 1");
     }
 
     #[test]
@@ -198,6 +240,38 @@ mod tests {
         let pt = PairTable::try_from("..").unwrap();
         pt.is_well_formed(0, 3); // j = pt.len(), should panic
     }
+
+    #[test]
+fn test_extended_brackets() {
+    // Simple pseudoknot: (( )) crossing [[ ]]
+    //                     0123456789...
+    let pt = PairTable::try_from("([)]").unwrap();
+    assert_eq!(pt[0 as NAIDX], Some(2));
+    assert_eq!(pt[1 as NAIDX], Some(3));
+    assert_eq!(pt[2 as NAIDX], Some(0));
+    assert_eq!(pt[3 as NAIDX], Some(1));
+}
+
+#[test]
+fn test_all_bracket_types() {
+    let pt = PairTable::try_from("([{<>}])").unwrap();
+    assert_eq!(pt[0 as NAIDX], Some(7));
+    assert_eq!(pt[1 as NAIDX], Some(6));
+    assert_eq!(pt[2 as NAIDX], Some(5));
+    assert_eq!(pt[3 as NAIDX], Some(4));
+}
+
+#[test]
+fn test_unmatched_open_square() {
+    let err = PairTable::try_from("[[]").unwrap_err();
+    assert_eq!(format!("{}", err), "Unmatched '(' at position 0");
+}
+
+#[test]
+fn test_unmatched_close_square() {
+    let err = PairTable::try_from("[]]").unwrap_err();
+    assert_eq!(format!("{}", err), "Unmatched ')' at position 2");
+}
 }
 
 
