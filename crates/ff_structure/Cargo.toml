@@ -13,7 +13,15 @@ categories.workspace = true
 
 [dependencies]
 nohash-hasher.workspace = true
+clap = { version = "4.5.56", features = ["derive"] }
+plotters = { version = "0.3", default-features = false, features = ["svg_backend", "line_series", "full_palette"] }
+
+
 
 [badges]
 maintenance = { status = "actively-developed" }
 
+
+[[bin]]
+name = "ff-arc-diagram"
+path = "src/bin/ff-arc-diagram.rs"

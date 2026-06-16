@@ -4,7 +4,7 @@ mod pair_table;
 mod multi_pair_table;
 mod loop_table;
 mod pair_set;
-mod extended_dot_bracket;
+mod extended_dotbracket;
 pub mod arc_diagram;
 
 pub use error::*;
@@ -14,7 +14,7 @@ pub use multi_pair_table::*;
 pub use loop_table::*;
 pub use pair_set::*;
 pub use arc_diagram::*;
-pub use extended_dot_bracket::*;
+pub use extended_dotbracket::*;
 
 
 

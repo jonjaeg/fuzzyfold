@@ -5,6 +5,9 @@
 
 use std::fmt;
 
+
+/// Errors that can occur when parsing a structure string into a PairTable
+/// different variants with associated data for different types of errors:
 #[derive(Debug)]
 pub enum StructureError {
     InvalidToken(String, String, usize),

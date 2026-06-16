@@ -13,6 +13,11 @@ use crate::{ExtendedDotBracket, BracketKind};
 pub struct PairTable(Vec<Option<NAIDX>>);
 
 impl PairTable {
+    /// Create a new PairTable of length `n` with all positions unpaired. (i.e. all None values)
+    pub fn new(n: usize) -> Self {
+        PairTable(vec![None; n])
+    }
+
     /// Check if the substructure from `i..j` is well-formed:
     /// - All pairings are internal to the interval
     pub fn is_well_formed(&self, i: usize, j: usize) -> bool {
@@ -76,7 +81,7 @@ impl IndexMut<usize> for PairTable {
         &mut self.0[index]
     }
 }
-/*/
+/*
 impl TryFrom<&str> for PairTable {
     type Error = StructureError;
 
