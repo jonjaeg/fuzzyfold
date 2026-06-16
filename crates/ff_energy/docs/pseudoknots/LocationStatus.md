@@ -22,7 +22,7 @@ A region $p$ is **pseudoknotted** if its border positions do not pair with
 each other:
 
 $$
-\text{is\_pseudo}(p) \iff \pi(p_i) \neq p_j
+\mathit{is\_pseudo}(p) \iff \pi(p_i) \neq p_j
 $$
 
 When $p$ is pseudoknotted, its two **border pairs** are:
