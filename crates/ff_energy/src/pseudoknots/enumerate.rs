@@ -2,7 +2,8 @@
 //! main enumeration file 
 
 use std::collections::HashSet;
-use ff_structure::{PairTable, StructureError};
+use ff_structure::{PairTable, StructureError, ExtendedDotBracketVec};
+
 
 use crate::pseudoknots::{
     ClosedRegion, 
@@ -10,7 +11,8 @@ use crate::pseudoknots::{
     LocationStatus,
     ClosingDescriptor,
     LoopType,
-    Loop, 
+    Loop,
+    extended_dot_bracket_to_pair_table, 
     is_pseudo, 
     collect_bands,
     closing_descriptor,  
@@ -167,7 +169,8 @@ fn visit(tree: &RegionTree, idx: usize, pt: &PairTable, loops: &mut Vec<Loop>) {
 
 /// Convenience entry point, mirroring Python's `parse_structure`.
 pub fn parse_structure(s: &str) -> Result<Vec<Loop>, StructureError> {
-    let pt = PairTable::try_from(s)?;
+    let edbv = ExtendedDotBracketVec::try_from(s)?;
+    let pt = extended_dot_bracket_to_pair_table(&edbv)?;
     let tree = build_closed_regions_tree(&pt);
     Ok(enumerate_loops(&tree, &pt))
 }
