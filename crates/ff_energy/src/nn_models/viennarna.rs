@@ -57,11 +57,11 @@ pub struct ViennaRNA {
     ninio_max: i32,
 
     /// Multiloop penalty for unpaired bases.
-    ml_base: i32,
+    pub(crate) ml_base: i32,
     /// Multiloop initiation penalty.
-    ml_closing: i32,
+    pub(crate) ml_closing: i32,
     /// Multiloop penalty per outgoing stem.
-    ml_intern: i32,
+    pub(crate) ml_intern: i32,
 
     triloops: Vec<LoopEntry>,
     tetraloops: Vec<LoopEntry>,
