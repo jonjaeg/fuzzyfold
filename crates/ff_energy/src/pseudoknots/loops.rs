@@ -4,9 +4,6 @@ use std::fmt;
 use crate::pseudoknots::{
     LocationStatus,
     ClosingDescriptor,
-    // the following are used in tests, but not in main code:
-    //closing_pairs,
-    //build_closed_regions_tree,
 };
 
 /// The seven loop categories from Rastegari & Condon's classification.
@@ -18,6 +15,23 @@ pub enum LoopType {
     Bulge,
     Multiloop,
     External,
+    Pseudoloop,
+}
+
+/// Context in which a [`LoopType::Pseudoloop`] appears.
+///
+/// Used by the D&P energy model (features 1–3 in Andronescu et al. 2010,
+/// Table 6) to select the appropriate initiation penalty:
+/// - Exterior:  `init_external`   (9.60 kcal/mol dp03, 1.38 dp09)
+/// - Multiloop: `init_multiloop`  (15.00 kcal/mol dp03, 10.07 dp09)
+/// - Pseudoloop:`init_pseudoloop` (15.00 kcal/mol, same for both)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PseudoloopContext {
+    /// Pseudoloop is at the top level (exterior).
+    External,
+    /// Pseudoloop is nested inside a standard multiloop.
+    Multiloop,
+    /// Pseudoloop is nested inside another pseudoloop.
     Pseudoloop,
 }
 
@@ -45,9 +59,19 @@ pub fn interior_loop_type(closing: (usize, usize), inner: (usize, usize)) -> (Lo
     (loop_type, n5, n3)
 
 }
-/// Mirrors the Python `Loop` dataclass. `closing` and the elements of
-/// `children` reuse `ClosingDescriptor` to represent the
-/// "single pair, or two crossing pairs" polymorphism from Python.
+
+/// Mirrors the Python `Loop` dataclass.
+///
+/// `closing` and elements of `children` use [`ClosingDescriptor`] to represent
+/// either a single pair or two crossing pairs.
+///
+/// Fields specific to `Pseudoloop` loops:
+/// - `n_loop1` / `n_loop2`: unpaired bases in the two junction gaps (H-type only;
+///   0 for non-H-type pseudoknots with >2 bands).
+/// - `n_bands`: number of crossing helices (bands) in this pseudoloop.
+/// - `n_nested`: number of closed regions nested *inside* the pseudoloop
+///   (distinct from the band tips listed in `children`).
+/// - `pk_context`: the loop context used for the D&P initiation penalty.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Loop {
     pub loop_type: LoopType,
@@ -57,6 +81,16 @@ pub struct Loop {
     pub children: Vec<ClosingDescriptor>,
     pub unpaired_5p: usize,
     pub unpaired_3p: usize,
+    /// Unpaired bases in gap1 (between the two 5' helix arms). H-type only.
+    pub n_loop1: usize,
+    /// Unpaired bases in gap2 (between the two 3' helix arms). H-type only.
+    pub n_loop2: usize,
+    /// Number of bands (crossing helices). Set on `Pseudoloop` loops.
+    pub n_bands: usize,
+    /// Number of actual nested closed regions inside the pseudoloop.
+    pub n_nested: usize,
+    /// Context for context-dependent initiation penalty. Set on `Pseudoloop` loops.
+    pub pk_context: Option<PseudoloopContext>,
 }
 
 impl Loop {
@@ -69,6 +103,11 @@ impl Loop {
             children: Vec::new(),
             unpaired_5p: 0,
             unpaired_3p: 0,
+            n_loop1: 0,
+            n_loop2: 0,
+            n_bands: 0,
+            n_nested: 0,
+            pk_context: None,
         }
     }
 
@@ -90,6 +129,31 @@ impl Loop {
     pub fn with_unpaired(mut self, n5: usize, n3: usize) -> Self {
         self.unpaired_5p = n5;
         self.unpaired_3p = n3;
+        self
+    }
+
+    /// Set the H-type pseudoknot gap sizes.
+    pub fn with_loop_sizes(mut self, n_loop1: usize, n_loop2: usize) -> Self {
+        self.n_loop1 = n_loop1;
+        self.n_loop2 = n_loop2;
+        self
+    }
+
+    /// Set the number of bands (crossing helices). For `Pseudoloop` loops.
+    pub fn with_bands(mut self, n: usize) -> Self {
+        self.n_bands = n;
+        self
+    }
+
+    /// Set the number of nested closed regions inside the pseudoloop.
+    pub fn with_nested(mut self, n: usize) -> Self {
+        self.n_nested = n;
+        self
+    }
+
+    /// Set the context for the D&P initiation penalty. For `Pseudoloop` loops.
+    pub fn with_pk_context(mut self, ctx: PseudoloopContext) -> Self {
+        self.pk_context = Some(ctx);
         self
     }
 
@@ -127,6 +191,10 @@ impl fmt::Display for Loop {
         }
         if self.unpaired_5p != 0 || self.unpaired_3p != 0 {
             parts.push(format!("unpaired=({}, {})", self.unpaired_5p, self.unpaired_3p));
+        }
+        if self.loop_type == LoopType::Pseudoloop {
+            parts.push(format!("loops=({}, {})", self.n_loop1, self.n_loop2));
+            parts.push(format!("bands={}", self.n_bands));
         }
 
         write!(f, "Loop({})", parts.join(", "))

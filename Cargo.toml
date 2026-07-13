@@ -1,5 +1,6 @@
 [workspace]
 members = ["crates/*"]
+exclude = ["crates/.claude"]
 default-members = ["crates/fuzzyfold"]
 resolver = "3"
 

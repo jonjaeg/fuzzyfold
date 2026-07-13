@@ -150,6 +150,94 @@ impl RegionTree {
     }
 }
 
+// for python export and visualizations
+// ── Step-by-step instrumented build ──────────────────────────────────────────
+
+#[derive(Debug, Clone)]
+pub enum BuildEvent {
+    Unpaired,
+    Opening,
+    Closing { merged: Vec<(usize, usize)> },
+}
+
+#[derive(Debug, Clone)]
+pub struct BuildStep {
+    pub lam: usize,
+    pub event: BuildEvent,
+    /// Arena indices of open regions (not yet completed).
+    pub stack: Vec<usize>,
+    /// Arena indices of completed top-level regions.
+    pub top_level: Vec<usize>,
+    /// Snapshot of the full arena after this step.
+    pub nodes: Vec<ClosedRegion>,
+    /// Arena index of the region completed this step (Case 3), if any.
+    pub completed: Option<usize>,
+}
+
+/// Same algorithm as `build_closed_regions_tree`, but emits one `BuildStep`
+/// per `lam` iteration so callers can observe the tree growing incrementally.
+pub fn build_closed_regions_tree_steps(pt: &PairTable) -> Vec<BuildStep> {
+    let n = pt.len();
+    let mut nodes: Vec<ClosedRegion> = Vec::new();
+    let mut top_level: Vec<usize> = Vec::new();
+    let mut stack: Vec<usize> = Vec::new();
+    let mut steps: Vec<BuildStep> = Vec::new();
+
+    for lam in 0..n {
+        let mut event = BuildEvent::Unpaired;
+        let mut completed = None;
+
+        if let Some(b) = pt[lam] {
+            let b = b as usize;
+
+            if lam < b {
+                // Case 1: opening bracket
+                let idx = nodes.len();
+                nodes.push(ClosedRegion::new(lam, b));
+                stack.push(idx);
+                event = BuildEvent::Opening;
+            } else if b < lam {
+                // Case 2: closing bracket — merge crossing regions
+                let mut merged = Vec::new();
+                let mut e = lam;
+                while let Some(&top) = stack.last() {
+                    if nodes[top].i > b {
+                        e = e.max(nodes[top].j);
+                        merged.push((nodes[top].i, nodes[top].j));
+                        stack.pop();
+                    } else {
+                        break;
+                    }
+                }
+                if let Some(&top) = stack.last() {
+                    nodes[top].j = nodes[top].j.max(e);
+                }
+                event = BuildEvent::Closing { merged };
+            }
+        }
+
+        // Case 3: does lam close the region on top of the stack?
+        if let Some(&top) = stack.last() {
+            if lam == nodes[top].j {
+                let region_idx = stack.pop().unwrap();
+                add_to_tree(&mut nodes, &mut top_level, region_idx);
+                completed = Some(region_idx);
+            }
+        }
+
+        steps.push(BuildStep {
+            lam,
+            event,
+            stack: stack.clone(),
+            top_level: top_level.clone(),
+            nodes: nodes.clone(),
+            completed,
+        });
+    }
+
+    steps
+}
+
 // Helper fucntions
 
 /// A region is pseudoknotted if its border positions `i` and `j` don't pair

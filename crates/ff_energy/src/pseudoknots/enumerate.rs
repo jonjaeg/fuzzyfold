@@ -1,25 +1,26 @@
-//! Band finding algorithm by Condon et al. 
-//! main enumeration file 
+//! Band finding algorithm by Condon et al.
+//! main enumeration file
 
 use std::collections::HashSet;
 use ff_structure::{PairTable, StructureError, ExtendedDotBracketVec};
 
 
 use crate::pseudoknots::{
-    ClosedRegion, 
+    ClosedRegion,
     RegionTree,
     LocationStatus,
     ClosingDescriptor,
     LoopType,
     Loop,
-    extended_dot_bracket_to_pair_table, 
-    is_pseudo, 
+    PseudoloopContext,
+    extended_dot_bracket_to_pair_table,
+    is_pseudo,
     collect_bands,
-    closing_descriptor,  
+    closing_descriptor,
     closing_pairs,
     location_status,
     interior_loop_type,
-    build_closed_regions_tree, 
+    build_closed_regions_tree,
     nested_pairs,
 };
 
@@ -52,13 +53,16 @@ pub fn enumerate_band_spanning_loops(tree: &RegionTree, region: &ClosedRegion, p
                         .with_unpaired(n5, n3),
                 );
             } else {
+                let n_unpaired_5p = count_unpaired(pt, outer_left + 1, inner_left);
+                let n_unpaired_3p = count_unpaired(pt, inner_right + 1, outer_right);
                 let mut children = vec![ClosingDescriptor::Single(inner_bp)];
                 children.extend(nest.into_iter().map(ClosingDescriptor::Single));
 
                 loops.push(
                     Loop::new(LoopType::Multiloop, LocationStatus::SpanBand)
                         .with_closing(ClosingDescriptor::Single(closing_bp))
-                        .with_children(children),
+                        .with_children(children)
+                        .with_unpaired(n_unpaired_5p, n_unpaired_3p),
                 );
             }
         }
@@ -76,7 +80,7 @@ pub fn enumerate_loops(tree: &RegionTree, pt: &PairTable) -> Vec<Loop> {
     let mut loops = Vec::new();
 
     for &idx in &tree.top_level {
-        visit(tree, idx, pt, &mut loops);
+        visit(tree, idx, pt, &mut loops, PseudoloopContext::External);
     }
 
     // External loop: in Python this was the `region.is_root` branch of
@@ -95,23 +99,42 @@ pub fn enumerate_loops(tree: &RegionTree, pt: &PairTable) -> Vec<Loop> {
 
 /// Post-order visit of `idx` and its descendants, appending one `Loop` per
 /// region (plus any SPAN_BAND loops from `enumerate_band_spanning_loops`).
-fn visit(tree: &RegionTree, idx: usize, pt: &PairTable, loops: &mut Vec<Loop>) {
+///
+/// `pk_context` is the context this node sees — i.e. what type of loop
+/// encloses this node. Passed top-down so `Pseudoloop` loops can record the
+/// correct initiation-penalty context.
+fn visit(tree: &RegionTree, idx: usize, pt: &PairTable, loops: &mut Vec<Loop>, pk_context: PseudoloopContext) {
     let region = &tree.nodes[idx];
+    let n_children = region.children.len();
+    let pseudo = is_pseudo(region, pt);
+
+    // Determine the context that children of THIS node will inherit.
+    let is_multiloop = !pseudo && (
+        n_children > 1 ||
+        (n_children == 1 && is_pseudo(&tree.nodes[region.children[0]], pt))
+    );
+    let child_context = if pseudo {
+        PseudoloopContext::Pseudoloop
+    } else if is_multiloop {
+        PseudoloopContext::Multiloop
+    } else {
+        pk_context
+    };
 
     for &child_idx in &region.children {
-        visit(tree, child_idx, pt, loops);
+        visit(tree, child_idx, pt, loops, child_context);
     }
 
-    let pseudo = is_pseudo(region, pt);
     let closing = closing_pairs(region, pt);
-    let n_children = region.children.len();
     let loc = location_status(region, region.parent.map(|p| &tree.nodes[p]), pt);
 
     if pseudo {
         let closing_set: HashSet<(usize, usize)> = closing.iter().copied().collect();
         let mut child_pairs: Vec<ClosingDescriptor> = Vec::new();
 
-        for chain in collect_bands(tree, region, pt) {
+        let bands: Vec<Vec<usize>> = collect_bands(tree, region, pt);
+
+        for chain in &bands {
             let outer_left_arm = chain[0];
             let inner_left_arm = *chain.last().unwrap();
             let outer_bp = (outer_left_arm, pt[outer_left_arm].expect("band rung must be paired") as usize);
@@ -132,10 +155,31 @@ fn visit(tree: &RegionTree, idx: usize, pt: &PairTable, loops: &mut Vec<Loop>) {
             ClosingDescriptor::Double((i, _), _) => *i,
         });
 
+        // For H-type pseudoknots (exactly 2 bands) compute the number of
+        // unpaired bases in each gap between the two helices.
+        let (n_loop1, n_loop2) = if bands.len() == 2 {
+            let chain1 = &bands[0];
+            let chain2 = &bands[1];
+            let tip1_5p   = *chain1.last().unwrap();
+            let outer2_5p =  chain2[0];
+            let outer1_3p = pt[chain1[0]].expect("band rung must be paired") as usize;
+            let tip2_3p   = pt[*chain2.last().unwrap()].expect("band rung must be paired") as usize;
+            (
+                count_unpaired(pt, tip1_5p + 1, outer2_5p),
+                count_unpaired(pt, outer1_3p + 1, tip2_3p),
+            )
+        } else {
+            (0, 0)
+        };
+
         loops.push(
             Loop::new(LoopType::Pseudoloop, loc)
                 .with_closing(ClosingDescriptor::Double(closing[0], closing[1]))
-                .with_children(child_pairs),
+                .with_children(child_pairs)
+                .with_loop_sizes(n_loop1, n_loop2)
+                .with_bands(bands.len())
+                .with_nested(n_children)
+                .with_pk_context(pk_context),
         );
     } else if n_children == 0 {
         let (ci, cj) = closing[0];
@@ -167,7 +211,17 @@ fn visit(tree: &RegionTree, idx: usize, pt: &PairTable, loops: &mut Vec<Loop>) {
     enumerate_band_spanning_loops(tree, region, pt, loops);
 }
 
-/// Convenience entry point, mirroring Python's `parse_structure`.
+/// Count unpaired positions in the half-open range `[start, end)`.
+fn count_unpaired(pt: &PairTable, start: usize, end: usize) -> usize {
+    if start >= end {
+        return 0;
+    }
+    (start..end).filter(|&p| pt[p].is_none()).count()
+}
+
+/// Main entry point for the whole enumeration process.
+/// Takes a dot-bracket string, builds the pair table and closed-regions tree,
+/// and returns the list of `Loop`s.
 pub fn parse_structure(s: &str) -> Result<Vec<Loop>, StructureError> {
     let edbv = ExtendedDotBracketVec::try_from(s)?;
     let pt = extended_dot_bracket_to_pair_table(&edbv)?;
@@ -282,6 +336,10 @@ mod enumerate_loops_tests {
                     ClosingDescriptor::Single((2, 6)),
                     ClosingDescriptor::Single((5, 12)),
                 ])
+                .with_loop_sizes(0, 3)
+                .with_bands(2)
+                .with_nested(0)
+                .with_pk_context(PseudoloopContext::External)
         );
 
         for lp in &loops[1..5] {

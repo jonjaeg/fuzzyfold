@@ -14,6 +14,10 @@ categories.workspace = true
 autobins = false
 
 [[bin]]
+name = "ff-calc-pseudo"
+path = "src/bin/ff-calc-pseudo.rs"
+
+[[bin]]
 name = "ff-randseq"
 path = "src/bin/ff-randseq.rs"
 

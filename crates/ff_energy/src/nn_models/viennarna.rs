@@ -66,6 +66,10 @@ pub struct ViennaRNA {
     triloops: Vec<LoopEntry>,
     tetraloops: Vec<LoopEntry>,
     hexaloops: Vec<LoopEntry>,
+
+    /// Optional D&P pseudoknot parameters (all 11 features).
+    /// `None` → fall back to the simplified multiloop approximation.
+    pub(crate) pk_params: Option<DPParams>,
 }
 
 macro_rules! rescale_params {
@@ -135,6 +139,8 @@ impl ViennaRNA {
             triloops: params.triloops.to_vec(),
             tetraloops: params.tetraloops.to_vec(),
             hexaloops: params.hexaloops.to_vec(),
+
+            pk_params: None,
         }
     }
 
@@ -179,6 +185,8 @@ impl ViennaRNA {
                 triloops: params.triloops_en37.to_vec(),
                 tetraloops: params.tetraloops_en37.to_vec(),
                 hexaloops: params.hexaloops_en37.to_vec(),
+
+                pk_params: None,
             }
         } else {
             let kelvin = celsius + K0;
@@ -221,8 +229,24 @@ impl ViennaRNA {
                 triloops: rescale_param!(triloops, params, scale),
                 tetraloops: rescale_param!(tetraloops, params, scale),
                 hexaloops: rescale_param!(hexaloops, params, scale),
+
+                pk_params: None,
             }
         }
+    }
+
+    /// Attach D&P pseudoknot parameters. Enables the full 11-feature Dirks-Pierce
+    /// energy formula for `Pseudoloop` and SpanBand loops instead of the default
+    /// simplified multiloop approximation.
+    ///
+    /// ```rust
+    /// use ff_energy::{ViennaRNA, parameters::{RNA_TURNER_2004, RNA_DP09}};
+    /// let model = ViennaRNA::from_thermo_params(&RNA_TURNER_2004, 37.0)
+    ///     .with_pseudoknot_params(RNA_DP09);
+    /// ```
+    pub fn with_pseudoknot_params(mut self, params: DPParams) -> Self {
+        self.pk_params = Some(params);
+        self
     }
 
     fn hairpin_bonus(&self, seq: &[Base]) -> Option<i32> {
@@ -455,7 +479,7 @@ impl ViennaRNA {
            + self.ml_intern * n as i32)
     }
 
-    fn exterior(&self, segments: &[&[Base]]) -> Result<i32, EnergyError> {
+    pub(crate) fn exterior(&self, segments: &[&[Base]]) -> Result<i32, EnergyError> {
         let mut en = 0;
         let n = segments.len() - 1; 
         for i in 0..n {
