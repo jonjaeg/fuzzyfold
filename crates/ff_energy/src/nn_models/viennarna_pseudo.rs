@@ -6,7 +6,7 @@ use crate::{Base, EnergyError, EnergyModel, NearestNeighborLoop};
 use crate::pseudoknots::{
     Loop, LoopType, ClosingDescriptor, LocationStatus,
     PseudoEnergyModel, PseudoloopContext,
-    single_pair, double_pair, collect_single_branches,
+    single_pair, double_pair,
 };
 use super::ViennaRNA;
 
@@ -59,9 +59,18 @@ impl PseudoEnergyModel for ViennaRNA {
                     }
                 }
                 let (i, j) = single_pair(lp.closing)?;
-                let branches: Vec<(NAIDX, NAIDX)> = collect_single_branches(&lp.children)?
-                    .into_iter()
-                    .map(|(a, b)| (a as NAIDX, b as NAIDX))
+                // A pseudoknot child has a Double closing descriptor with crossing
+                // pairs (a1 < a2 < b1 < b2). We use the leftmost pair (a1, b1)
+                // as the effective multiloop stem: it is a real WC pair, so the
+                // pair checks in `multibranch` pass. The region b1..b2 (the far
+                // strand of the PK) is counted as loop nucleotides — a small
+                // approximation. The PK's internal energy comes from its own
+                // LoopType::Pseudoloop entry.
+                let branches: Vec<(NAIDX, NAIDX)> = lp.children.iter()
+                    .map(|cd| match cd {
+                        ClosingDescriptor::Single(p) => (p.0 as NAIDX, p.1 as NAIDX),
+                        ClosingDescriptor::Double(p1, _p2) => (p1.0 as NAIDX, p1.1 as NAIDX),
+                    })
                     .collect();
                 self.energy_of_loop(sequence, &NearestNeighborLoop::Multibranch {
                     closing: (i as NAIDX, j as NAIDX),
