@@ -101,3 +101,33 @@ pub static RNA_DP09: DPParams = DPParams {
 /// `DPParams` cannot represent it. A proper implementation requires a dedicated 2D
 /// table struct. Deferred.
 pub struct CaoChen2006Note;
+
+// ---------------------------------------------------------------------------
+// Why CC09 is not implemented (and DP09 is the right choice)
+// ---------------------------------------------------------------------------
+//
+// Andronescu, Pop & Condon (2010) also trained a CC09 parameter set for the
+// Cao-Chen (CC) energy model. CC09 = MT09 + dp09 + cc09, with 920 total
+// features (vs. 374 for DP09). The 546 additional cc09 parameters are:
+//   - 258 loop entropy features for the L1/L2 junction loops of H-type PKs
+//   - 288 coaxial stacking features for H-type PKs (Tyagi & Mathews 2007)
+// The CC features apply only to H-type PKs where Cao & Chen provide values;
+// non-H-type PKs and unparameterised H-type cases fall back to DP.
+//
+// Two fundamental reasons CC09 is not implemented here:
+//
+// 1. Non-linear energy function.
+//    The CC model takes min(coaxial_stack, dangle) at each applicable site,
+//    producing quadratic terms in the parameters. This is incompatible with
+//    the linear loop-sum architecture used throughout ff_energy.
+//
+// 2. Loop entropies are ΔS°, not ΔG°.
+//    Cao & Chen treat enthalpy as zero for junction loops, so their 258
+//    loop entropy parameters are entropy changes that scale as −TΔS°. They
+//    require separate temperature handling, unlike all other parameters.
+//
+// Crucially, CC09 does not outperform DP09. On short pseudoknotted structures
+// (ShPK, the relevant regime for e.g. Zika xrRNA1 at ~70 nt), F-measure is
+// 0.817 for DP09 vs. 0.742 for CC09 (Table 3/4, Andronescu 2010). The paper
+// attributes this to insufficient training data for the large CC feature set.
+// DP09 remains the recommended parameter set for this codebase.
