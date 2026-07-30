@@ -3,9 +3,11 @@ mod closed_region_tree;
 mod enumerate;
 mod loops;
 mod pseudo_energy_model;
+pub mod neighbors;
 
 pub use parser::*;
 pub use closed_region_tree::*;
 pub use loops::*;
 pub use enumerate::*;
 pub use pseudo_energy_model::{PseudoEnergyModel, single_pair, double_pair, collect_single_branches};
+pub use neighbors::{neighbors, pair_table_to_dot_bracket};
