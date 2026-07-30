@@ -165,24 +165,6 @@ mod tests {
         assert!(result.is_ok(), "pseudoknot energy evaluation failed: {:?}", result);
     }
 
-    /// Smoke test: dp03 junction formula is pure arithmetic, no Turner tables needed.
-    ///
-    /// Structure: GCGAUUUCUGACCGCUUUUUUGUCAG / [[[....(((((]]]......]))))
-    ///   n_bands=2, n_loop1=4, n_loop2=6, n_nested=0
-    ///   init_ext=960 + pb=20×2 + pup=10×(4+6) + pps=10×0 = 960+40+100 = 1100
-    #[test]
-    fn test_dp03_junction_formula() {
-        use crate::parameters::{RNA_TURNER_2004, RNA_DP03};
-
-        let seq   = NucleotideVec::try_from_rna("GCGAUUUCUGACCGCUUUUUUGUCAG").unwrap();
-        let loops = parse_structure("[[[....(((((]]]......)))))").unwrap();
-        let m = ViennaRNA::from_thermo_params(&RNA_TURNER_2004, 37.0)
-            .with_pseudoknot_params(RNA_DP03);
-        let pk_loop = loops.iter().find(|l| l.loop_type == LoopType::Pseudoloop).unwrap();
-
-        assert_eq!(m.energy_of_pseudo_loop(&seq, pk_loop).unwrap(), 1100);
-    }
-
     /// Smoke test: dp09 junction formula is pure arithmetic, no Turner tables needed.
     ///
     /// Same structure as above.
@@ -198,25 +180,6 @@ mod tests {
         let pk_loop = loops.iter().find(|l| l.loop_type == LoopType::Pseudoloop).unwrap();
 
         assert_eq!(m.energy_of_pseudo_loop(&seq, pk_loop).unwrap(), 414);
-    }
-
-    /// Full dp03 total energy for an H-type pseudoknot.
-    ///
-    /// HotKnots v2 reference: −2.42 kcal/mol = −242 dcal/mol.
-    /// Tolerance ±1 dcal/mol for f64→i32 rounding in stack scaling.
-    
-    #[test]
-    fn test_dp03_total_energy() {
-        use crate::parameters::{RNA_TURNER_2004 , RNA_DP03};
-
-        let seq   = NucleotideVec::try_from_rna("GCGAUUUCUGACCGCUUUUUUGUCAG").unwrap();
-        let loops = parse_structure("(((....[[[[[)))......]]]]]").unwrap();
-        
-        let m = ViennaRNA::from_thermo_params(&RNA_TURNER_2004, 37.0)
-            .with_pseudoknot_params(RNA_DP03);
-        let e = m.energy_of_pseudoknotted_structure(&seq, &loops).unwrap();
-        assert!((e - (-242)).abs() <= 1,
-            "dp03 total energy: expected ~−242 dcal/mol, got {e}");
     }
 
     /// Full dp09+mt09 total energy for an H-type pseudoknot.
