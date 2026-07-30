@@ -1,3 +1,6 @@
+/// The crate ff_structure contains submodules error, dotbracket, pair_table, multi_pair_table, loop_table and hamming distance.
+/// and makes them globally usable.
+
 mod error;
 mod dotbracket;
 mod pair_table;

@@ -5,11 +5,12 @@ use std::convert::TryFrom;
 use crate::NAIDX;
 use crate::StructureError;
 use crate::{DotBracket, DotBracketVec};
-use crate::{ExtendedDotBracket, BracketKind}; 
+use crate::{ExtendedDotBracket, BracketKind};
+use std::fmt;
 
 /// As of v0.1.3 the PairTable field is private. A pair-table should
 /// be constructed by From or TryFrom traits, but then be save to use.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct PairTable(Vec<Option<NAIDX>>);
 
 impl PairTable {
@@ -24,7 +25,7 @@ impl PairTable {
         assert!(j <= self.len(), "Invalid interval: j must be <= length");
 
         for k in i..j {
-            if let Some(l) = self[k] {
+            if let Some(l) = self[k as NAIDX] {
                 let ul = l as usize;
                 if ul < i || ul >= j {
                     return false; // points outside
@@ -178,6 +179,24 @@ impl TryFrom<&DotBracketVec> for PairTable {
     }
 }
 
+impl fmt::Display for PairTable {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Example format: "[-, 3, 2, -]" for a 4-nt structure
+        write!(f, "[")?;
+        for (i, partner) in self.0.iter().enumerate() {
+            // after each element except the first, print a comma AND a whitespace
+            if i > 0 {
+                write!(f, ", ")?;
+            }
+            match partner {
+                Some(j) => write!(f, "{j}")?,
+                None => write!(f, "-")?,
+            }
+        }
+        write!(f, "]")
+    }
+}
+
 
 #[cfg(test)]
 mod tests {
@@ -276,6 +295,13 @@ fn test_unmatched_open_square() {
 fn test_unmatched_close_square() {
     let err = PairTable::try_from("[]]").unwrap_err();
     assert_eq!(format!("{}", err), "Unmatched ')' at position 2");
+}
+
+#[test]
+fn test_display_pair_table() {
+    let pt = PairTable::try_from("(.())").unwrap();
+    let display = format!("{}", pt);
+    assert_eq!(display, "[4, -, 3, 2, 0]");
 }
 }
 

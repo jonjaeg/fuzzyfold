@@ -11,8 +11,17 @@ use crate::LoopDecomposition;
 use crate::NearestNeighborLoop;
 use crate::K0;
 
-/// The union of different parameterizations,
-/// may contain redundant fallback parameters.
+// for energy_of_pair function
+//use ff_structure::PairTable;
+
+/// The default ViennaRNA-v2.6 energy model.
+///
+/// The current implementation allows different
+/// parameter files, but only the standard
+/// settings (dangle=2, tetraloops, etc.)
+///
+/// Only single-stranded folding is supported.
+///
 pub struct ViennaRNA {
     /// Steric constraint on minimum hairpin length. (Always three.)
     min_hp_size: usize,
@@ -518,7 +527,43 @@ impl ViennaRNA {
         }
         Ok(en)
     }
+
+///// A potential helper function to evaluate the energy of a base-pair move.
+//    fn _energy_of_pair(&self, 
+//        sequence: &[Base], 
+//        structure: &PairTable, 
+//        i: usize,
+//        j: usize
+//    ) -> i32 {
+//        let inner = structure.loop_enclosed_by(Some((i, j)));
+//        let epair = structure.get_enclosing_pair(i, j);
+//
+//        if let (Some(pi), Some(pj)) = (structure[i], structure[j]) {
+//            assert!(j == pi && i == pj);
+//            let outer = structure.loop_enclosed_by(epair);
+//            let mut pt = structure.clone();
+//            pt[i] = None;
+//            pt[j] = None;
+//            let combo = pt.loop_enclosed_by(epair);
+//
+//            let en_paired = self.energy_of_loop(sequence, &inner) + self.energy_of_loop(sequence, &outer);
+//            let en_absent = self.energy_of_loop(sequence, &combo);
+//            return en_absent.unwrap() - en_paired.unwrap()
+//        } else {
+//            assert!(structure[i] == structure[j]);
+//            let combo = structure.loop_enclosed_by(epair);
+//            let mut pt = structure.clone();
+//            pt[i] = Some(j);
+//            pt[j] = Some(i);
+//            let outer = pt.loop_enclosed_by(epair);
+//            let en_paired = self.energy_of_loop(sequence, &inner) + self.energy_of_loop(sequence, &outer);
+//            let en_absent = self.energy_of_loop(sequence, &combo);
+//            return en_paired - en_absent 
+//        }
+//    }
+//
 }
+
 
 const CAN_PAIR: [[bool; 4]; 4] = {
     use Base::*;
