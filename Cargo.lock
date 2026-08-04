@@ -493,6 +493,7 @@ dependencies = [
  "criterion",
  "ff_energy",
  "ff_structure",
+ "rustc-hash",
 ]
 
 [[package]]

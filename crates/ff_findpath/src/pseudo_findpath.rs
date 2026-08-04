@@ -11,10 +11,11 @@
 //! start, deletions of pairs present in start but absent in target).
 
 use std::cmp::Ordering;
-use std::collections::{HashMap, HashSet};
+
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use ff_energy::{
-    pair_table_to_dot_bracket, parse_structure, EnergyError, NucleotideVec,
+    pair_table_to_dot_bracket, parse_loops_from_pt, EnergyError, NucleotideVec,
     PseudoEnergyModel, ViennaRNA,
     extended_dot_bracket_to_pair_table,
 };
@@ -29,9 +30,17 @@ use crate::utils::{Move, PathStats, PathStep, compare_structures};
 struct PseudoIntermediate {
     pt:              PairTable,
     saddle_energy:   f64,
-    current_energy:  f64,
     remaining_moves: Vec<Move>,
     path:            Vec<Move>,
+}
+
+/// Lightweight record built during expansion — no `Vec` clones until survivors known (B2).
+struct Expansion {
+    pt:             PairTable,
+    saddle_energy:  f64,
+    current_energy: f64,
+    parent_idx:     usize,
+    move_idx:       usize,
 }
 
 // ---------------------------------------------------------------------------
@@ -42,19 +51,17 @@ struct PseudoIntermediate {
 ///
 /// Results are stored in `cache` (keyed by pair table) so that the same
 /// intermediate reached via different move orderings is only computed once.
+/// Uses [`parse_loops_from_pt`] to skip the PT → string → PT round-trip (B1).
 fn eval_energy(
     model: &ViennaRNA,
     seq: &[ff_energy::Base],
     pt: &PairTable,
-    cache: &mut HashMap<PairTable, f64>,
+    cache: &mut FxHashMap<PairTable, f64>,
 ) -> Result<f64, String> {
     if let Some(&cached) = cache.get(pt) {
         return Ok(cached);
     }
-    let dot = pair_table_to_dot_bracket(pt)
-        .map_err(|e: StructureError| format!("dot-bracket conversion: {e}"))?;
-    let loops = parse_structure(&dot)
-        .map_err(|e: StructureError| format!("parse_structure: {e}"))?;
+    let loops = parse_loops_from_pt(pt);
     let energy = model.energy_of_pseudoknotted_structure(seq, &loops)
         .map(|e| e as f64 / 100.0)
         .map_err(|e: EnergyError| format!("energy: {e:?}"))?;
@@ -132,7 +139,7 @@ pub fn findpath_pseudo(
     let start_dot = pair_table_to_dot_bracket(&start_pt)
         .unwrap_or_else(|_| ".".repeat(n));
 
-    let mut cache: HashMap<PairTable, f64> = HashMap::new();
+    let mut cache: FxHashMap<PairTable, f64> = FxHashMap::default();
     let start_energy = eval_energy(model, seq, &start_pt, &mut cache)?;
 
     // ── move set ──────────────────────────────────────────────────────────────
@@ -161,19 +168,19 @@ pub fn findpath_pseudo(
 
     // ── beam initialisation ───────────────────────────────────────────────────
     let mut beam = vec![PseudoIntermediate {
-        pt:              start_pt,
+        pt:              start_pt.clone(),
         saddle_energy:   start_energy,
-        current_energy:  start_energy,
         remaining_moves: diff.move_list,
         path:            Vec::new(),
     }];
 
     // ── beam search ───────────────────────────────────────────────────────────
     for _step in 0..total_steps {
-        let mut candidates: Vec<PseudoIntermediate> = Vec::new();
+        // B2: collect lightweight expansions first; no path/remaining_moves clones yet.
+        let mut expansions: Vec<Expansion> = Vec::new();
 
-        for parent in &beam {
-            for (idx, mv) in parent.remaining_moves.iter().enumerate() {
+        for (parent_idx, parent) in beam.iter().enumerate() {
+            for (move_idx, mv) in parent.remaining_moves.iter().enumerate() {
                 let i = mv.i as usize;
                 let j = mv.j as usize;
 
@@ -188,7 +195,7 @@ pub fn findpath_pseudo(
                     continue;
                 }
 
-                // Apply move.
+                // Apply move to a new PT.
                 let mut new_pt = parent.pt.clone();
                 if mv.is_insertion {
                     new_pt[i] = Some(mv.j);
@@ -198,7 +205,7 @@ pub fn findpath_pseudo(
                     new_pt[j] = None;
                 }
 
-                // Memoized PK energy evaluation.
+                // Memoized PK energy evaluation (B1: no string roundtrip).
                 let energy = match eval_energy(model, seq, &new_pt, &mut cache) {
                     Ok(e) => e,
                     Err(_) => continue,
@@ -211,30 +218,24 @@ pub fn findpath_pseudo(
 
                 let new_saddle = f64::max(parent.saddle_energy, energy);
 
-                let mut new_remaining = parent.remaining_moves.clone();
-                new_remaining.remove(idx);
-
-                let mut new_path = parent.path.clone();
-                new_path.push(mv.clone());
-
-                candidates.push(PseudoIntermediate {
-                    pt:              new_pt,
-                    saddle_energy:   new_saddle,
-                    current_energy:  energy,
-                    remaining_moves: new_remaining,
-                    path:            new_path,
+                expansions.push(Expansion {
+                    pt:             new_pt,
+                    saddle_energy:  new_saddle,
+                    current_energy: energy,
+                    parent_idx,
+                    move_idx,
                 });
             }
         }
 
-        if candidates.is_empty() {
+        if expansions.is_empty() {
             return Err(
                 "Search stuck: no valid moves remain (energy ceiling too tight?)".to_string()
             );
         }
 
         // Sort: lowest saddle first; break ties by current energy.
-        candidates.sort_by(|a, b| {
+        expansions.sort_by(|a, b| {
             a.saddle_energy
                 .partial_cmp(&b.saddle_energy)
                 .unwrap_or(Ordering::Equal)
@@ -246,11 +247,12 @@ pub fn findpath_pseudo(
         });
 
         // Deduplicate by pair table (first occurrence = best path to that structure).
-        let mut seen: HashSet<PairTable> = HashSet::new();
-        candidates.retain(|c| seen.insert(c.pt.clone()));
+        // FxHashSet gives ~3× faster probes than SipHash for integer-heavy keys (B3).
+        let mut seen: FxHashSet<PairTable> = FxHashSet::default();
+        expansions.retain(|exp| seen.insert(exp.pt.clone()));
 
         // Tighten the energy ceiling to the best saddle found so far.
-        if let Some(best_saddle) = candidates.first().map(|c| c.saddle_energy) {
+        if let Some(best_saddle) = expansions.first().map(|e| e.saddle_energy) {
             max_energy = Some(match max_energy {
                 Some(cap) => cap.min(best_saddle),
                 None      => best_saddle,
@@ -258,13 +260,29 @@ pub fn findpath_pseudo(
         }
 
         // Prune to beam width.
-        candidates.truncate(beam_width);
-        beam = candidates;
+        expansions.truncate(beam_width);
+
+        // B2: materialize only the survivors — at most `beam_width` clones.
+        // B4: swap_remove(move_idx) is O(1) vs remove(move_idx) which is O(moves).
+        beam = expansions.into_iter().map(|exp| {
+            let parent = &beam[exp.parent_idx];
+            let mv = parent.remaining_moves[exp.move_idx].clone();
+            let mut new_remaining = parent.remaining_moves.clone();
+            new_remaining.swap_remove(exp.move_idx);
+            let mut new_path = parent.path.clone();
+            new_path.push(mv);
+            PseudoIntermediate {
+                pt:              exp.pt,
+                saddle_energy:   exp.saddle_energy,
+                remaining_moves: new_remaining,
+                path:            new_path,
+            }
+        }).collect();
     }
 
     // ── reconstruct full trajectory ───────────────────────────────────────────
     let winner = beam.into_iter().next().ok_or("No beam survivors")?;
-    reconstruct_path(model, seq, n, &start_dot, start_energy, &winner.path, &mut cache)
+    reconstruct_path(model, seq, n, &start_pt, &start_dot, start_energy, &winner.path, &mut cache)
 }
 
 // ---------------------------------------------------------------------------
@@ -275,19 +293,14 @@ fn reconstruct_path(
     model:        &ViennaRNA,
     seq:          &[ff_energy::Base],
     n:            usize,
+    start_pt:     &PairTable,
     start_dot:    &str,
     start_energy: f64,
     moves:        &[Move],
-    cache:        &mut HashMap<PairTable, f64>,
+    cache:        &mut FxHashMap<PairTable, f64>,
 ) -> Result<(Vec<PathStep>, PathStats), String> {
     let mut trajectory = Vec::with_capacity(moves.len() + 1);
-    let mut pt = {
-        // Rebuild start_pt from start_dot so we can replay moves.
-        let edbv = ExtendedDotBracketVec::try_from(start_dot)
-            .map_err(|e: StructureError| format!("start dot-bracket: {e}"))?;
-        extended_dot_bracket_to_pair_table(&edbv)
-            .map_err(|e: StructureError| format!("start pair table: {e}"))?
-    };
+    let mut pt = start_pt.clone();
 
     trajectory.push(PathStep {
         structure:    start_dot.to_owned(),
@@ -340,7 +353,7 @@ fn reconstruct_path(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ff_energy::{ViennaRNA, parameters::{RNA_MT09, RNA_DP09}};
+    use ff_energy::{ViennaRNA, parameters::{RNA_MT09, RNA_DP09}, NucleotideVec, parse_structure};
 
     fn model() -> ViennaRNA {
         ViennaRNA::from_andrunescu_params(&RNA_MT09).with_pseudoknot_params(RNA_DP09)
@@ -360,8 +373,6 @@ mod tests {
     /// Non-pseudoknotted target: result must match energy_of_pseudoknotted_structure.
     #[test]
     fn test_non_pk_target() {
-        use ff_energy::NucleotideVec;
-
         let m = model();
         let seq = "GGGAAACCC";
         let target = "(((...)))";
@@ -413,7 +424,7 @@ mod tests {
     fn test_non_empty_start() {
         let m = model();
         // Sequence: GCGAUUUCUGACCGCUUUUUUGUCAG  (26 nt)
-        // Start:    .......(((((.........))))  — helix 2 only, pairs (7,25)...(11,21)  [26 nt]
+        // Start:    .......(((((.........)))))  — helix 2 only, pairs (7,25)...(11,21)  [26 nt]
         // Target:   [[[....(((((]]]......)))))  — full H-type PK
         // Diff: 3 insertions (0,12),(1,13),(2,14); 0 deletions
         let seq    = "GCGAUUUCUGACCGCUUUUUUGUCAG";

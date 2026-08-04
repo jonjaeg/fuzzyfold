@@ -219,14 +219,25 @@ fn count_unpaired(pt: &PairTable, start: usize, end: usize) -> usize {
     (start..end).filter(|&p| pt[p].is_none()).count()
 }
 
+/// Builds the list of `Loop`s for a structure directly from its `PairTable`,
+/// skipping the string round-trip.
+///
+/// Prefer this over [`parse_structure`] whenever the pair table is already
+/// available (e.g. during beam search): it avoids the O(P²)
+/// `pair_table_to_dot_bracket` step and the redundant re-parse back to a
+/// `PairTable` that `parse_structure` performs internally.
+pub fn parse_loops_from_pt(pt: &PairTable) -> Vec<Loop> {
+    let tree = build_closed_regions_tree(pt);
+    enumerate_loops(&tree, pt)
+}
+
 /// Main entry point for the whole enumeration process.
 /// Takes a dot-bracket string, builds the pair table and closed-regions tree,
 /// and returns the list of `Loop`s.
 pub fn parse_structure(s: &str) -> Result<Vec<Loop>, StructureError> {
     let edbv = ExtendedDotBracketVec::try_from(s)?;
     let pt = extended_dot_bracket_to_pair_table(&edbv)?;
-    let tree = build_closed_regions_tree(&pt);
-    Ok(enumerate_loops(&tree, &pt))
+    Ok(parse_loops_from_pt(&pt))
 }
 
 

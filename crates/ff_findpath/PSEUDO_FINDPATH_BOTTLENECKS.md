@@ -7,38 +7,36 @@ Workload: synthetic H-type PK structures, 30–90 nt, beam widths 1–200.
 
 ### Beam-width sweep — 50 nt / 20 pairs
 
-| beam | time    |
-|------|---------|
-| 1    | 992 µs  |
-| 5    | 4.4 ms  |
-| 10   | 8.3 ms  |
-| 25   | 19 ms   |
-| 50   | 36 ms   |
+| beam | before  | after   | change |
+|------|---------|---------|--------|
+| 1    | 992 µs  | 604 µs  | −39%   |
+| 5    | 4.4 ms  | 2.67 ms | −40%   |
+| 10   | 8.3 ms  | 5.13 ms | −38%   |
+| 25   | 19 ms   | 11.6 ms | −39%   |
+| 50   | 36 ms   | 22.2 ms | −38%   |
 
-Scaling is **linear in beam width** — the memoization cache prevents duplicate
-intermediate structures from being re-evaluated.
+Scaling remains **linear in beam width** post-optimisation.
 
 ### Structure-size sweep — beam = 10
 
-| structure       | time   |
-|-----------------|--------|
-| 30 nt / 10 pairs | 1.1 ms |
-| 50 nt / 20 pairs | 8.3 ms |
-| 70 nt / 30 pairs | 28 ms  |
-| 90 nt / 40 pairs | 67 ms  |
-
-Scaling is roughly **O(pairs² · N²)**: doubling pairs at fixed beam costs
-~3–8× more time because per-step candidate count grows as `beam × remaining_pairs`
-and each energy evaluation costs O(N²).
+| structure         | before | after   | change |
+|-------------------|--------|---------|--------|
+| 30 nt / 10 pairs  | 1.1 ms | 669 µs  | −42%   |
+| 50 nt / 20 pairs  | 8.3 ms | 5.13 ms | −38%   |
+| 70 nt / 30 pairs  | 28 ms  | 17.4 ms | −38%   |
+| 90 nt / 40 pairs  | 67 ms  | 40.4 ms | −40%   |
 
 ### Non-empty start vs. empty start — 70 nt, beam = 10
 
-| start            | moves | time    |
-|------------------|-------|---------|
-| empty            | 30    | 28.5 ms |
-| stem-2 preformed | 15    | 8.9 ms  |
+| start            | before  | after   | change |
+|------------------|---------|---------|--------|
+| empty            | 28.5 ms | 17.4 ms | −39%   |
+| stem-2 preformed | 8.9 ms  | 5.70 ms | −36%   |
 
-Time scales directly with the number of diff moves.
+The ~39% gain is uniform across structure sizes and beam widths: B1
+(eliminating the O(P²) `pair_table_to_dot_bracket` + full `parse_structure`
+re-parse on every cache miss) is the dominant contributor.  B2–B4 account
+for the remainder and are especially visible at large beam widths.
 
 ---
 
