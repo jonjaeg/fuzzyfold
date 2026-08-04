@@ -26,6 +26,10 @@ criterion.workspace = true
 name = "bench_greedy_functions"
 harness = false
 
+[[bench]]
+name = "bench_pseudo_findpath"
+harness = false
+
 
 [badges]
 maintenance = { status = "actively-developed" }
@@ -38,3 +42,11 @@ path = "src/bin/ff-greedy.rs"
 [[bin]]
 name = "ff-findpath"
 path = "src/bin/ff-findpath.rs"
+
+[[bin]]
+name = "ff-pseudo-findpath"
+path = "src/bin/ff-pseudo-findpath.rs"
+
+[[bin]]
+name = "ff-pseudo-findpath-bench-runner"
+path = "src/bin/ff-pseudo-findpath-bench-runner.rs"

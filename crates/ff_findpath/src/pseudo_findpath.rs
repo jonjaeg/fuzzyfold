@@ -1,25 +1,24 @@
-//! PK-aware findpath: beam search from the empty structure to a pseudoknotted target.
+//! PK-aware findpath: beam search from an arbitrary start structure to a pseudoknotted target.
 //!
 //! Unlike the standard [`findpath`](crate::findpath::findpath), this variant:
-//! - starts from the fully-unpaired structure (not an arbitrary S1)
+//! - accepts any start structure (defaults to fully-unpaired if `None`)
 //! - allows crossing base-pair insertions (pseudoknots)
 //! - evaluates energy via [`energy_of_pseudoknotted_structure`] — a full
-//!   closed-region-tree recalculation on every step
+//!   closed-region-tree recalculation, memoized by pair table
 //!
-//! The algorithm is a directed beam search: only moves that add pairs present
-//! in the target structure are considered. Since the start is fully unpaired,
-//! all moves are insertions; the search explores orderings of inserting the
-//! P target pairs and returns the ordering with the lowest saddle energy.
+//! The algorithm is a directed beam search: only moves that close the diff
+//! between start and target are considered (insertions of pairs missing in
+//! start, deletions of pairs present in start but absent in target).
 
 use std::cmp::Ordering;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use ff_energy::{
     pair_table_to_dot_bracket, parse_structure, EnergyError, NucleotideVec,
     PseudoEnergyModel, ViennaRNA,
     extended_dot_bracket_to_pair_table,
 };
-use ff_structure::{ExtendedDotBracketVec, PairTable, StructureError, NAIDX};
+use ff_structure::{ExtendedDotBracketVec, PairTable, StructureError};
 
 use crate::utils::{Move, PathStats, PathStep, compare_structures};
 
@@ -36,33 +35,45 @@ struct PseudoIntermediate {
 }
 
 // ---------------------------------------------------------------------------
-// Energy helper
+// Energy helper (memoized)
 // ---------------------------------------------------------------------------
 
 /// Evaluate the full pseudoknot energy of `pt` in kcal/mol.
 ///
-/// Converts the pair table to an extended dot-bracket string, builds the
-/// closed-region tree via [`parse_structure`], and sums loop energies.
-fn eval_energy(model: &ViennaRNA, seq: &[ff_energy::Base], pt: &PairTable) -> Result<f64, String> {
+/// Results are stored in `cache` (keyed by pair table) so that the same
+/// intermediate reached via different move orderings is only computed once.
+fn eval_energy(
+    model: &ViennaRNA,
+    seq: &[ff_energy::Base],
+    pt: &PairTable,
+    cache: &mut HashMap<PairTable, f64>,
+) -> Result<f64, String> {
+    if let Some(&cached) = cache.get(pt) {
+        return Ok(cached);
+    }
     let dot = pair_table_to_dot_bracket(pt)
         .map_err(|e: StructureError| format!("dot-bracket conversion: {e}"))?;
     let loops = parse_structure(&dot)
         .map_err(|e: StructureError| format!("parse_structure: {e}"))?;
-    model.energy_of_pseudoknotted_structure(seq, &loops)
+    let energy = model.energy_of_pseudoknotted_structure(seq, &loops)
         .map(|e| e as f64 / 100.0)
-        .map_err(|e: EnergyError| format!("energy: {e:?}"))
+        .map_err(|e: EnergyError| format!("energy: {e:?}"))?;
+    cache.insert(pt.clone(), energy);
+    Ok(energy)
 }
 
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
-/// Find the minimum-barrier folding path from the empty structure to `target`.
+/// Find the minimum-barrier folding path from `start` to `target`.
 ///
 /// # Arguments
 /// - `model`       — ViennaRNA energy model (must have PK parameters attached via
 ///                   [`ViennaRNA::with_pseudoknot_params`] for PK-accurate energies)
 /// - `sequence`    — RNA sequence string (`ACGU` alphabet)
+/// - `start`       — start structure in extended dot-bracket notation, or `None`
+///                   for the fully-unpaired structure
 /// - `target`      — target structure in extended dot-bracket notation (e.g. `"((([[[)))...]]]"`)
 /// - `beam_width`  — number of beam members kept per step (`1` = greedy)
 /// - `max_energy`  — optional energy ceiling in kcal/mol; intermediates above
@@ -79,6 +90,7 @@ fn eval_energy(model: &ViennaRNA, seq: &[ff_energy::Base], pt: &PairTable) -> Re
 pub fn findpath_pseudo(
     model: &ViennaRNA,
     sequence: &str,
+    start: Option<&str>,
     target: &str,
     beam_width: usize,
     mut max_energy: Option<f64>,
@@ -96,32 +108,52 @@ pub fn findpath_pseudo(
     let n = target_pt.len();
     if n != seq.len() {
         return Err(format!(
-            "Sequence length ({}) != structure length ({})", seq.len(), n
+            "Sequence length ({}) != target structure length ({})", seq.len(), n
         ));
     }
 
     // ── start state ───────────────────────────────────────────────────────────
-    let start_pt = PairTable::new(n);
-    let start_energy = eval_energy(model, seq, &start_pt)?;
+    let start_pt = match start {
+        None => PairTable::new(n),
+        Some(s) => {
+            let edbv = ExtendedDotBracketVec::try_from(s)
+                .map_err(|e: StructureError| format!("Invalid start structure: {e}"))?;
+            let pt = extended_dot_bracket_to_pair_table(&edbv)
+                .map_err(|e: StructureError| format!("Start pair table: {e}"))?;
+            if pt.len() != n {
+                return Err(format!(
+                    "Start structure length ({}) != target structure length ({})", pt.len(), n
+                ));
+            }
+            pt
+        }
+    };
 
-    // All moves are insertions of the target pairs (start is fully unpaired).
+    let start_dot = pair_table_to_dot_bracket(&start_pt)
+        .unwrap_or_else(|_| ".".repeat(n));
+
+    let mut cache: HashMap<PairTable, f64> = HashMap::new();
+    let start_energy = eval_energy(model, seq, &start_pt, &mut cache)?;
+
+    // ── move set ──────────────────────────────────────────────────────────────
+    // compare_structures gives deletions-first, then insertions, sorted by i.
+    // That ordering keeps deletions early so they unblock insertions in later steps.
     let diff = compare_structures(&start_pt, &target_pt);
     let total_steps = diff.move_list.len();
 
     if total_steps == 0 {
-        // Target is the empty structure — trivial path.
         let stats = PathStats {
-            saddle_energy: start_energy,
+            saddle_energy:  start_energy,
             barrier_energy: 0.0,
             start_energy,
-            end_energy: start_energy,
+            end_energy:     start_energy,
         };
         return Ok((
             vec![PathStep {
-                structure: ".".repeat(n),
+                structure:    start_dot,
                 move_applied: None,
-                energy: start_energy,
-                step_index: 0,
+                energy:       start_energy,
+                step_index:   0,
             }],
             stats,
         ));
@@ -145,19 +177,15 @@ pub fn findpath_pseudo(
                 let i = mv.i as usize;
                 let j = mv.j as usize;
 
-                // Validity check.
-                // Insertions: both positions must currently be unpaired.
+                // Validity: insertions require both positions unpaired;
+                // deletions require the pair to exist.
                 // Crossing pairs (pseudoknots) are allowed — no LoopTable check.
                 if mv.is_insertion {
                     if parent.pt[i].is_some() || parent.pt[j].is_some() {
                         continue;
                     }
-                } else {
-                    // Deletion: the pair must exist (shouldn't happen for start=empty,
-                    // but kept for correctness if used with a non-empty start later).
-                    if parent.pt[i] != Some(mv.j) {
-                        continue;
-                    }
+                } else if parent.pt[i] != Some(mv.j) {
+                    continue;
                 }
 
                 // Apply move.
@@ -170,8 +198,8 @@ pub fn findpath_pseudo(
                     new_pt[j] = None;
                 }
 
-                // Full PK energy evaluation.
-                let energy = match eval_energy(model, seq, &new_pt) {
+                // Memoized PK energy evaluation.
+                let energy = match eval_energy(model, seq, &new_pt, &mut cache) {
                     Ok(e) => e,
                     Err(_) => continue,
                 };
@@ -236,7 +264,7 @@ pub fn findpath_pseudo(
 
     // ── reconstruct full trajectory ───────────────────────────────────────────
     let winner = beam.into_iter().next().ok_or("No beam survivors")?;
-    reconstruct_path(model, seq, n, &winner.path, start_energy)
+    reconstruct_path(model, seq, n, &start_dot, start_energy, &winner.path, &mut cache)
 }
 
 // ---------------------------------------------------------------------------
@@ -247,17 +275,25 @@ fn reconstruct_path(
     model:        &ViennaRNA,
     seq:          &[ff_energy::Base],
     n:            usize,
-    moves:        &[Move],
+    start_dot:    &str,
     start_energy: f64,
+    moves:        &[Move],
+    cache:        &mut HashMap<PairTable, f64>,
 ) -> Result<(Vec<PathStep>, PathStats), String> {
     let mut trajectory = Vec::with_capacity(moves.len() + 1);
-    let mut pt = PairTable::new(n);
+    let mut pt = {
+        // Rebuild start_pt from start_dot so we can replay moves.
+        let edbv = ExtendedDotBracketVec::try_from(start_dot)
+            .map_err(|e: StructureError| format!("start dot-bracket: {e}"))?;
+        extended_dot_bracket_to_pair_table(&edbv)
+            .map_err(|e: StructureError| format!("start pair table: {e}"))?
+    };
 
     trajectory.push(PathStep {
-        structure:     ".".repeat(n),
-        move_applied:  None,
-        energy:        start_energy,
-        step_index:    0,
+        structure:    start_dot.to_owned(),
+        move_applied: None,
+        energy:       start_energy,
+        step_index:   0,
     });
 
     let mut saddle = start_energy;
@@ -273,10 +309,8 @@ fn reconstruct_path(
             pt[j] = None;
         }
 
-        let en = eval_energy(model, seq, &pt)?;
-        if en > saddle {
-            saddle = en;
-        }
+        let en = eval_energy(model, seq, &pt, cache)?;
+        if en > saddle { saddle = en; }
 
         let dot = pair_table_to_dot_bracket(&pt)
             .unwrap_or_else(|_| "?".repeat(n));
@@ -318,26 +352,23 @@ mod tests {
         let m = model();
         let seq = "GCGAAACGC";
         let target = ".........";
-        let (path, stats) = findpath_pseudo(&m, seq, target, 1, None).unwrap();
+        let (path, stats) = findpath_pseudo(&m, seq, None, target, 1, None).unwrap();
         assert_eq!(path.len(), 1);
         assert_eq!(stats.barrier_energy, 0.0);
     }
 
-    /// Non-pseudoknotted target: result must equal a standard hairpin energy.
+    /// Non-pseudoknotted target: result must match energy_of_pseudoknotted_structure.
     #[test]
     fn test_non_pk_target() {
-        use ff_energy::{EnergyModel, NucleotideVec};
-        use ff_structure::PairTable;
+        use ff_energy::NucleotideVec;
 
         let m = model();
         let seq = "GGGAAACCC";
         let target = "(((...)))";
-        let (path, _stats) = findpath_pseudo(&m, seq, target, 4, None).unwrap();
+        let (path, _stats) = findpath_pseudo(&m, seq, None, target, 4, None).unwrap();
 
-        // Final structure must be the target.
         assert_eq!(path.last().unwrap().structure, target);
 
-        // Final energy must match energy_of_pseudoknotted_structure on the target.
         let seq_vec = NucleotideVec::try_from_rna(seq).unwrap();
         let loops = parse_structure(target).unwrap();
         let expected = m.energy_of_pseudoknotted_structure(&seq_vec, &loops).unwrap() as f64 / 100.0;
@@ -347,14 +378,13 @@ mod tests {
         );
     }
 
-    /// H-type pseudoknot target: path must reach target and all steps must be valid.
+    /// H-type pseudoknot target: path must reach target (compared by pair table).
     #[test]
     fn test_h_type_pk_target() {
         let m = model();
-        // GCGAUUUCUGACCGCUUUUUUGUCAG / [[[....(((((]]]......)))))
         let seq    = "GCGAUUUCUGACCGCUUUUUUGUCAG";
         let target = "[[[....(((((]]]......)))))";
-        let (path, stats) = findpath_pseudo(&m, seq, target, 40, None).unwrap();
+        let (path, stats) = findpath_pseudo(&m, seq, None, target, 40, None).unwrap();
 
         // pair_table_to_dot_bracket may assign different bracket families than the input,
         // so compare pair tables rather than strings.
@@ -366,6 +396,50 @@ mod tests {
         ).unwrap();
         assert_eq!(final_pt, target_pt, "final pair table must match target");
         println!("H-type PK path ({} steps), saddle = {:.2} kcal/mol:",
+            path.len() - 1, stats.saddle_energy);
+        for step in &path {
+            println!("  [{:2}] {} {:.2} kcal/mol",
+                step.step_index, step.structure, step.energy);
+        }
+    }
+
+    /// Non-empty start: fold from the second stem of the target PK (helix 2 preformed)
+    /// into the full H-type pseudoknot by inserting the 3 pairs of helix 1.
+    ///
+    /// Because start is exactly helix 2 of the target and helix 1 pairs are
+    /// simply inserted (no deletions), every intermediate is a valid H-type PK —
+    /// the energy evaluation is guaranteed not to hit complex topologies.
+    #[test]
+    fn test_non_empty_start() {
+        let m = model();
+        // Sequence: GCGAUUUCUGACCGCUUUUUUGUCAG  (26 nt)
+        // Start:    .......(((((.........))))  — helix 2 only, pairs (7,25)...(11,21)  [26 nt]
+        // Target:   [[[....(((((]]]......)))))  — full H-type PK
+        // Diff: 3 insertions (0,12),(1,13),(2,14); 0 deletions
+        let seq    = "GCGAUUUCUGACCGCUUUUUUGUCAG";
+        let start  = ".......(((((.........)))))";
+        let target = "[[[....(((((]]]......)))))";
+        let (path, stats) = findpath_pseudo(&m, seq, Some(start), target, 10, None).unwrap();
+
+        // First step must be the start structure (by pair table).
+        let first_pt = extended_dot_bracket_to_pair_table(
+            &ExtendedDotBracketVec::try_from(path.first().unwrap().structure.as_str()).unwrap()
+        ).unwrap();
+        let start_pt = extended_dot_bracket_to_pair_table(
+            &ExtendedDotBracketVec::try_from(start).unwrap()
+        ).unwrap();
+        assert_eq!(first_pt, start_pt, "first step must be the start structure");
+
+        // Last step must be the target structure.
+        let final_pt = extended_dot_bracket_to_pair_table(
+            &ExtendedDotBracketVec::try_from(path.last().unwrap().structure.as_str()).unwrap()
+        ).unwrap();
+        let target_pt = extended_dot_bracket_to_pair_table(
+            &ExtendedDotBracketVec::try_from(target).unwrap()
+        ).unwrap();
+        assert_eq!(final_pt, target_pt, "final pair table must match target");
+
+        println!("Non-empty start PK path ({} steps), saddle = {:.2} kcal/mol:",
             path.len() - 1, stats.saddle_energy);
         for step in &path {
             println!("  [{:2}] {} {:.2} kcal/mol",

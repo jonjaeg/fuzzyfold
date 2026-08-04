@@ -486,6 +486,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "ff_findpath"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "criterion",
+ "ff_energy",
+ "ff_structure",
+]
+
+[[package]]
 name = "ff_kinetics"
 version = "0.4.1"
 dependencies = [
@@ -515,7 +525,7 @@ dependencies = [
 
 [[package]]
 name = "ff_structure"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "clap",
  "nohash-hasher",

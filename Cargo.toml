@@ -16,6 +16,9 @@ categories = [
     "science::bioinformatics::sequence-analysis",
 ]
 
+[profile.bench]
+debug = true   # keep symbols for samply/flamegraph profiling
+
 [workspace.dependencies]
 # local crates
 ff_energy    = { path = "./crates/ff_energy", version = "0.4.0" }
