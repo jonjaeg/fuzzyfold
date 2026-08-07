@@ -9,31 +9,34 @@ use fuzzyfold::energy::parameters::{RNA_TURNER_2004, RNA_MT09, RNA_DP03, RNA_DP0
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
 enum PkChoice {
-    /// Turner 2004 NN + dp03 PK (original HotKnots default)
-    Dp03,
-    /// Turner 2004 NN + dp09 PK (incorrect pairing — use mt09 instead)
+    /// MT09 stacking + dp09 PK params — correct pairing (dp09 was trained with MT09)
     Dp09,
-    /// mt09 NN + dp09 PK (correct pairing; dp09 was trained with mt09)
-    Mt09,
+    /// Turner 2004 stacking + dp03 PK params — original HotKnots default
+    Dp03,
 }
 
 #[derive(Debug, Parser)]
 #[command(name = "ff-calc-pseudo")]
 #[command(about = "Evaluate pseudoknot free energy using the Dirks-Pierce model.\n\
-                   Parameter sets: dp03 (Turner04+dp03), dp09 (Turner04+dp09), \
-                   mt09 (mt09+dp09, recommended).")]
+                   Parameter sets:\n\
+                   dp09  MT09 stacking + dp09 PK  (correct pairing, default)\n\
+                   dp03  Turner04 stacking + dp03 PK (original HotKnots)")]
 struct Cli {
     /// Input file (FASTA-like: optional >header, sequence, structure), or "-" for stdin
     #[arg(value_name = "INPUT", default_value = "-")]
     input: String,
 
     /// Pseudoknot parameter set
-    #[arg(long, value_enum, default_value = "dp03")]
+    #[arg(long, value_enum, default_value = "dp09")]
     pk_params: PkChoice,
 
-    /// Temperature in Celsius (ignored for mt09, which is fixed at 37 °C)
+    /// Temperature in Celsius (ignored for dp09, which uses MT09 fixed at 37 °C)
     #[arg(long, default_value = "37.0")]
     celsius: f64,
+
+    /// Print the energy contribution of each loop individually
+    #[arg(short = 'v', long)]
+    verbose: bool,
 }
 
 fn read_input(path: &str) -> Result<(String, String)> {
@@ -77,15 +80,24 @@ fn main() -> Result<()> {
     let loops = parse_structure(&st_str)?;
 
     let model = match cli.pk_params {
+        PkChoice::Dp09 => ViennaRNA::from_andrunescu_params(&RNA_MT09)
+            .with_pseudoknot_params(RNA_DP09),
         PkChoice::Dp03 => ViennaRNA::from_thermo_params(&RNA_TURNER_2004, cli.celsius)
             .with_pseudoknot_params(RNA_DP03),
-        PkChoice::Dp09 => ViennaRNA::from_thermo_params(&RNA_TURNER_2004, cli.celsius)
-            .with_pseudoknot_params(RNA_DP09),
-        PkChoice::Mt09 => ViennaRNA::from_andrunescu_params(&RNA_MT09)
-            .with_pseudoknot_params(RNA_DP09),
     };
 
-    let energy = model.energy_of_pseudoknotted_structure(&seq, &loops)?;
-    println!("{:.4}", energy as f64 / 100.0);
+    if cli.verbose {
+        let mut total = 0i32;
+        for (i, lp) in loops.iter().enumerate() {
+            let e = model.energy_of_pseudo_loop(&seq, lp)?;
+            total += e;
+            println!("{:3}  {:8.4}  {lp}", i, e as f64 / 100.0);
+        }
+        println!("{}", "-".repeat(60));
+        println!("sum  {:8.4}", total as f64 / 100.0);
+    } else {
+        let energy = model.energy_of_pseudoknotted_structure(&seq, &loops)?;
+        println!("{:.4}", energy as f64 / 100.0);
+    }
     Ok(())
 }
