@@ -154,8 +154,51 @@ pub fn region_tree(structure: &str) -> PyResult<(Vec<i64>, Vec<RegionNode>)> {
     Ok((pair_table, region_nodes))
 }
 
+// ── shared helpers ────────────────────────────────────────────────────────────
+
+#[allow(clippy::too_many_arguments)]
+fn build_pk_model(
+    nn_params:       &str,
+    init_external:   f64,
+    init_multiloop:  f64,
+    init_pseudoloop: f64,
+    pb:    f64,
+    pup:   f64,
+    pps:   f64,
+    ap:    f64,
+    bp:    f64,
+    cp:    f64,
+    e_stp:  f64,
+    e_intp: f64,
+) -> PyResult<ViennaRNA> {
+    let dp = DPParams {
+        init_external:   (init_external   * 100.0).round() as i32,
+        init_multiloop:  (init_multiloop  * 100.0).round() as i32,
+        init_pseudoloop: (init_pseudoloop * 100.0).round() as i32,
+        pb:  (pb  * 100.0).round() as i32,
+        pup: (pup * 100.0).round() as i32,
+        pps: (pps * 100.0).round() as i32,
+        ap:  (ap  * 100.0).round() as i32,
+        bp:  (bp  * 100.0).round() as i32,
+        cp:  (cp  * 100.0).round() as i32,
+        e_stp,
+        e_intp,
+    };
+    match nn_params {
+        "mt09"      => Ok(ViennaRNA::from_andrunescu_params(&RNA_MT09).with_pseudoknot_params(dp)),
+        "turner2004"=> Ok(ViennaRNA::from_thermo_params(&RNA_TURNER_2004, 37.0).with_pseudoknot_params(dp)),
+        "dp03"      => Ok(ViennaRNA::from_thermo_params(&RNA_TURNER_2004, 37.0).with_pseudoknot_params(RNA_DP03)),
+        "dp09"      => Ok(ViennaRNA::from_andrunescu_params(&RNA_MT09).with_pseudoknot_params(RNA_DP09)),
+        other => Err(PyValueError::new_err(format!(
+            "Unknown nn_params '{other}'. Valid: 'mt09', 'turner2004', 'dp03', 'dp09'."
+        ))),
+    }
+}
+
+// ── pseudo_energy ─────────────────────────────────────────────────────────────
+
 /// Evaluate the free energy (kcal/mol) of a pseudoknotted RNA structure using
-/// the Dirks-Pierce model with caller-supplied DP parameters.
+/// the Dirks-Pierce model.
 ///
 /// Parameters
 /// ----------
@@ -164,10 +207,10 @@ pub fn region_tree(structure: &str) -> PyResult<(Vec<i64>, Vec<RegionNode>)> {
 /// structure : str
 ///     Dot-bracket structure with pseudoknot notation (`()[]{}<>ABCDabcd`).
 /// nn_params : str
-///     Nearest-neighbor parameter set: `"mt09"` (recommended), `"turner2004"`,
-///     `"dp03"`, or `"dp09"`.
+///     `"dp09"` (default, MT09+dp09), `"dp03"` (Turner2004+dp03),
+///     `"mt09"` or `"turner2004"` (custom DP params via keyword args).
 /// init_external, init_multiloop, init_pseudoloop, pb, pup, pps, ap, bp, cp : float
-///     Integer-valued DP penalties in **kcal/mol** (converted internally to dcal/mol).
+///     DP penalties in **kcal/mol** (used when nn_params is `"mt09"` or `"turner2004"`).
 /// e_stp, e_intp : float
 ///     Multiplicative scale factors (dimensionless).
 ///
@@ -179,8 +222,8 @@ pub fn region_tree(structure: &str) -> PyResult<(Vec<i64>, Vec<RegionNode>)> {
 #[pyo3(signature = (
     sequence,
     structure,
-    nn_params = "mt09",
-    init_external   = 1.38,
+    nn_params = "dp09",
+    init_external   = -1.38,
     init_multiloop  = 10.07,
     init_pseudoloop = 15.00,
     pb   = 2.46,
@@ -208,37 +251,89 @@ pub fn pseudo_energy(
     e_stp:  f64,
     e_intp: f64,
 ) -> PyResult<f64> {
-    let dp = DPParams {
-        init_external:   (init_external   * 100.0).round() as i32,
-        init_multiloop:  (init_multiloop  * 100.0).round() as i32,
-        init_pseudoloop: (init_pseudoloop * 100.0).round() as i32,
-        pb:  (pb  * 100.0).round() as i32,
-        pup: (pup * 100.0).round() as i32,
-        pps: (pps * 100.0).round() as i32,
-        ap:  (ap  * 100.0).round() as i32,
-        bp:  (bp  * 100.0).round() as i32,
-        cp:  (cp  * 100.0).round() as i32,
-        e_stp,
-        e_intp,
-    };
-
-    let model = match nn_params {
-        "mt09" => ViennaRNA::from_andrunescu_params(&RNA_MT09).with_pseudoknot_params(dp),
-        "turner2004" => ViennaRNA::from_thermo_params(&RNA_TURNER_2004, 37.0).with_pseudoknot_params(dp),
-        "dp03" => ViennaRNA::from_thermo_params(&RNA_TURNER_2004, 37.0).with_pseudoknot_params(RNA_DP03),
-        "dp09" => ViennaRNA::from_andrunescu_params(&RNA_MT09).with_pseudoknot_params(RNA_DP09),
-        other => return Err(PyValueError::new_err(format!(
-            "Unknown nn_params '{}'. Valid: 'mt09', 'turner2004', 'dp03', 'dp09'.", other
-        ))),
-    };
-
+    let model = build_pk_model(
+        nn_params, init_external, init_multiloop, init_pseudoloop,
+        pb, pup, pps, ap, bp, cp, e_stp, e_intp,
+    )?;
     let seq   = NucleotideVec::try_from_rna(sequence)
         .map_err(|e| PyValueError::new_err(e.to_string()))?;
     let loops = parse_structure(structure)
         .map_err(|e| PyValueError::new_err(e.to_string()))?;
-
     let energy = model.energy_of_pseudoknotted_structure(&seq, &loops)
         .map_err(|e| PyValueError::new_err(format!("{:?}", e)))?;
-
     Ok(energy as f64 / 100.0)
+}
+
+// ── pseudo_energy_loops ───────────────────────────────────────────────────────
+
+/// Per-loop energy breakdown for a pseudoknotted RNA structure.
+///
+/// Same parameters as `pseudo_energy`. Returns one entry per loop from the
+/// Rastegari-Condon decomposition; the energies sum to the total structure
+/// energy.
+///
+/// Returns
+/// -------
+/// list of (float, str)
+///     Each entry is `(energy_kcal_mol, loop_description)`.
+///     `loop_description` is the same format as the `--verbose` flag of
+///     `ff-calc-pseudo`: e.g. `"Loop(Stack, SpanBand, closing=(0,8), inner=(1,7))"`.
+///
+/// Example
+/// -------
+/// ```python
+/// import fuzzyfold as ff
+/// loops = ff.pseudo_energy_loops(seq, structure)
+/// for i, (e, desc) in enumerate(loops):
+///     print(f"{i:3}  {e:8.4f}  {desc}")
+/// print(f"sum  {sum(e for e, _ in loops):8.4f}")
+/// ```
+#[pyfunction]
+#[pyo3(signature = (
+    sequence,
+    structure,
+    nn_params = "dp09",
+    init_external   = -1.38,
+    init_multiloop  = 10.07,
+    init_pseudoloop = 15.00,
+    pb   = 2.46,
+    pup  = 0.06,
+    pps  = 0.96,
+    ap   = 3.41,
+    bp   = 0.56,
+    cp   = 0.12,
+    e_stp  = 0.89,
+    e_intp = 0.74,
+))]
+pub fn pseudo_energy_loops(
+    sequence:        &str,
+    structure:       &str,
+    nn_params:       &str,
+    init_external:   f64,
+    init_multiloop:  f64,
+    init_pseudoloop: f64,
+    pb:    f64,
+    pup:   f64,
+    pps:   f64,
+    ap:    f64,
+    bp:    f64,
+    cp:    f64,
+    e_stp:  f64,
+    e_intp: f64,
+) -> PyResult<Vec<(f64, String)>> {
+    let model = build_pk_model(
+        nn_params, init_external, init_multiloop, init_pseudoloop,
+        pb, pup, pps, ap, bp, cp, e_stp, e_intp,
+    )?;
+    let seq   = NucleotideVec::try_from_rna(sequence)
+        .map_err(|e| PyValueError::new_err(e.to_string()))?;
+    let loops = parse_structure(structure)
+        .map_err(|e| PyValueError::new_err(e.to_string()))?;
+    loops.iter()
+        .map(|lp| {
+            let e = model.energy_of_pseudo_loop(&seq, lp)
+                .map_err(|e| PyValueError::new_err(format!("{:?}", e)))?;
+            Ok((e as f64 / 100.0, format!("{lp}")))
+        })
+        .collect()
 }
