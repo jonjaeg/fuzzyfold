@@ -100,7 +100,7 @@ pub fn findpath_pseudo(
     start: Option<&str>,
     target: &str,
     beam_width: usize,
-    mut max_energy: Option<f64>,
+    max_energy: Option<f64>,
 ) -> Result<(Vec<PathStep>, PathStats), String> {
     // ── parse inputs ─────────────────────────────────────────────────────────
     let seq_vec = NucleotideVec::try_from_rna(sequence)
@@ -179,6 +179,9 @@ pub fn findpath_pseudo(
         // B2: collect lightweight expansions first; no path/remaining_moves clones yet.
         let mut expansions: Vec<Expansion> = Vec::new();
 
+        let mut n_eval_errors = 0usize;
+        let mut n_ceiling_pruned = 0usize;
+
         for (parent_idx, parent) in beam.iter().enumerate() {
             for (move_idx, mv) in parent.remaining_moves.iter().enumerate() {
                 let i = mv.i as usize;
@@ -208,11 +211,12 @@ pub fn findpath_pseudo(
                 // Memoized PK energy evaluation (B1: no string roundtrip).
                 let energy = match eval_energy(model, seq, &new_pt, &mut cache) {
                     Ok(e) => e,
-                    Err(_) => continue,
+                    Err(_) => { n_eval_errors += 1; continue; }
                 };
 
                 // Energy ceiling filter.
                 if max_energy.is_some_and(|cap| energy > cap) {
+                    n_ceiling_pruned += 1;
                     continue;
                 }
 
@@ -229,9 +233,26 @@ pub fn findpath_pseudo(
         }
 
         if expansions.is_empty() {
-            return Err(
-                "Search stuck: no valid moves remain (energy ceiling too tight?)".to_string()
-            );
+            let reason = if n_eval_errors > 0 && n_ceiling_pruned == 0 {
+                format!(
+                    "all {n_eval_errors} candidate move(s) produced intermediates the energy \
+                     evaluator could not handle (complex pseudoknot topology with >2 bands or \
+                     crossing strands). The target structure may require evaluator extensions."
+                )
+            } else if n_ceiling_pruned > 0 && n_eval_errors == 0 {
+                format!(
+                    "all {n_ceiling_pruned} candidate move(s) exceeded the energy ceiling \
+                     ({:.2} kcal/mol). Try raising --max-energy or removing it entirely.",
+                    max_energy.unwrap_or(f64::INFINITY)
+                )
+            } else {
+                format!(
+                    "no valid moves remain ({n_eval_errors} eval error(s), \
+                     {n_ceiling_pruned} ceiling-pruned). \
+                     Try removing --max-energy or checking the target topology."
+                )
+            };
+            return Err(format!("Search stuck at step {_step}: {reason}"));
         }
 
         // Sort: lowest saddle first; break ties by current energy.
@@ -250,14 +271,6 @@ pub fn findpath_pseudo(
         // FxHashSet gives ~3× faster probes than SipHash for integer-heavy keys (B3).
         let mut seen: FxHashSet<PairTable> = FxHashSet::default();
         expansions.retain(|exp| seen.insert(exp.pt.clone()));
-
-        // Tighten the energy ceiling to the best saddle found so far.
-        if let Some(best_saddle) = expansions.first().map(|e| e.saddle_energy) {
-            max_energy = Some(match max_energy {
-                Some(cap) => cap.min(best_saddle),
-                None      => best_saddle,
-            });
-        }
 
         // Prune to beam width.
         expansions.truncate(beam_width);
