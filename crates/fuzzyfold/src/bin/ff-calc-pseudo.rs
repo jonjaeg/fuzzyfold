@@ -1,26 +1,30 @@
 use std::fs::File;
 use std::io::{BufRead, BufReader, stdin};
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use clap::{Parser, ValueEnum};
 
-use fuzzyfold::energy::{ViennaRNA, NucleotideVec, PseudoEnergyModel, parse_structure};
-use fuzzyfold::energy::parameters::{RNA_TURNER_2004, RNA_MT09, RNA_DP03, RNA_DP09};
+use fuzzyfold::energy::parameters::{RNA_ANDRONESCU_2007, RNA_DP03, RNA_DP09, RNA_MT09, RNA_TURNER_2004};
+use fuzzyfold::energy::{NucleotideVec, PseudoEnergyModel, ViennaRNA, parse_structure};
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
 enum PkChoice {
-    /// MT09 stacking + dp09 PK params — correct pairing (dp09 was trained with MT09)
+    /// MT09 stacking + DP09 PK params — correct pairing (DP09 was trained with MT09)
     Dp09,
-    /// Turner 2004 stacking + dp03 PK params — original HotKnots default
+    /// Turner 2004 stacking + DP03 PK params — original HotKnots default
     Dp03,
+    /// Andronescu 2007 stacking + DP09 PK params — tests cross-model compatibility
+    Andronescu07,
 }
 
 #[derive(Debug, Parser)]
 #[command(name = "ff-calc-pseudo")]
-#[command(about = "Evaluate pseudoknot free energy using the Dirks-Pierce model.\n\
+#[command(
+    about = "Evaluate pseudoknot free energy using the Dirks-Pierce model.\n\
                    Parameter sets:\n\
                    dp09  MT09 stacking + dp09 PK  (correct pairing, default)\n\
-                   dp03  Turner04 stacking + dp03 PK (original HotKnots)")]
+                   dp03  Turner04 stacking + dp03 PK (original HotKnots)"
+)]
 struct Cli {
     /// Input file (FASTA-like: optional >header, sequence, structure), or "-" for stdin
     #[arg(value_name = "INPUT", default_value = "-")]
@@ -67,7 +71,7 @@ fn read_input(path: &str) -> Result<(String, String)> {
     }
 
     let seq = sequence.ok_or_else(|| anyhow!("Missing sequence line"))?;
-    let st  = structure.ok_or_else(|| anyhow!("Missing structure line"))?;
+    let st = structure.ok_or_else(|| anyhow!("Missing structure line"))?;
     Ok((seq, st))
 }
 
@@ -76,14 +80,18 @@ fn main() -> Result<()> {
 
     let (seq_str, st_str) = read_input(&cli.input)?;
 
-    let seq   = NucleotideVec::try_from_rna(&seq_str)?;
+    let seq = NucleotideVec::try_from_rna(&seq_str)?;
     let loops = parse_structure(&st_str)?;
 
     let model = match cli.pk_params {
-        PkChoice::Dp09 => ViennaRNA::from_andrunescu_params(&RNA_MT09)
-            .with_pseudoknot_params(RNA_DP09),
+        PkChoice::Dp09 => {
+            ViennaRNA::from_andrunescu_params(&RNA_MT09).with_pseudoknot_params(RNA_DP09)
+        }
         PkChoice::Dp03 => ViennaRNA::from_thermo_params(&RNA_TURNER_2004, cli.celsius)
             .with_pseudoknot_params(RNA_DP03),
+        PkChoice::Andronescu07 => {
+            ViennaRNA::from_andrunescu_params(&RNA_ANDRONESCU_2007).with_pseudoknot_params(RNA_DP09)
+        }
     };
 
     if cli.verbose {
