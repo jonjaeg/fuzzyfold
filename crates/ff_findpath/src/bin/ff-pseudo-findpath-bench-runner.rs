@@ -25,6 +25,7 @@ fn main() {
             black_box(TGT),
             black_box(BEAM),
             black_box(None),
+            false,
         ).unwrap();
         black_box(result);
     }

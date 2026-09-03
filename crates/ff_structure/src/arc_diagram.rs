@@ -23,11 +23,14 @@ pub fn arc_diagram_svg(sequence: &str, pt: &PairTable) -> String {
     }
 
     // Natural height for each arc: span/2 = semicircle, never looks flat
-    let natural_heights: Vec<f64> = arcs.iter().map(|&(i, j)| {
-        let xi = x_pos(i);
-        let xj = x_pos(j);
-        (xj - xi) / 2.0
-    }).collect();
+    let natural_heights: Vec<f64> = arcs
+        .iter()
+        .map(|&(i, j)| {
+            let xi = x_pos(i);
+            let xj = x_pos(j);
+            (xj - xi) / 2.0
+        })
+        .collect();
 
     // base_y must accommodate the tallest arc + margin
     let max_natural_h = natural_heights.iter().cloned().fold(0.0_f64, f64::max);
@@ -49,9 +52,9 @@ pub fn arc_diagram_svg(sequence: &str, pt: &PairTable) -> String {
     }
 
     // Final height = natural (semicircle) + small rank offset
-    let arc_heights: Vec<f64> = (0..arcs.len()).map(|idx| {
-        natural_heights[idx] + arc_rank[idx] as f64 * disambiguation_step
-    }).collect();
+    let arc_heights: Vec<f64> = (0..arcs.len())
+        .map(|idx| natural_heights[idx] + arc_rank[idx] as f64 * disambiguation_step)
+        .collect();
 
     // --- SVG ---
     let mut svg = String::new();
@@ -64,7 +67,8 @@ pub fn arc_diagram_svg(sequence: &str, pt: &PairTable) -> String {
     // Backbone
     svg.push_str(&format!(
         r##"<line x1="{x1}" y1="{y}" x2="{x2}" y2="{y}" stroke="#585b70" stroke-width="1.5"/>"##,
-        x1 = margin, y = base_y,
+        x1 = margin,
+        y = base_y,
         x2 = margin + (n as f64 - 1.0) * base_spacing,
     ));
 
@@ -90,14 +94,21 @@ pub fn arc_diagram_svg(sequence: &str, pt: &PairTable) -> String {
         ("C", "#89dceb"),
     ];
     let base_color = |ch: char| -> &'static str {
-        colors.iter().find(|(b, _)| b.chars().next() == Some(ch))
-            .map(|(_, c)| *c).unwrap_or("#cdd6f4")
+        colors
+            .iter()
+            .find(|(b, _)| b.starts_with(ch))
+            .map(|(_, c)| *c)
+            .unwrap_or("#cdd6f4")
     };
 
     for (i, ch) in sequence.chars().enumerate() {
         let x = x_pos(i);
         let color = base_color(ch.to_ascii_uppercase());
-        let stroke = if pt[i].is_some() { "#ffffff" } else { "#585b70" };
+        let stroke = if pt[i].is_some() {
+            "#ffffff"
+        } else {
+            "#585b70"
+        };
 
         svg.push_str(&format!(
             r##"<circle cx="{x}" cy="{y}" r="{r}" fill="{fill}" stroke="{stroke}" stroke-width="1.2"/>"##,
@@ -118,7 +129,6 @@ pub fn arc_diagram_svg(sequence: &str, pt: &PairTable) -> String {
     svg.push_str("</svg>");
     svg
 }
-
 
 /// Generates the arc diagram and writes it to a file.
 pub fn save_arc_diagram(

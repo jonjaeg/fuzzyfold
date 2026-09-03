@@ -13,6 +13,8 @@ enum PkChoice {
     Dp09,
     /// Turner 2004 stacking + DP03 PK params — original HotKnots default
     Dp03,
+    /// Turner 2004 stacking + DP09 PK params — standard ViennaRNA base with dp09 PK
+    Turner04,
     /// Andronescu 2007 stacking + DP09 PK params — tests cross-model compatibility
     Andronescu07,
 }
@@ -89,6 +91,8 @@ fn main() -> Result<()> {
         }
         PkChoice::Dp03 => ViennaRNA::from_thermo_params(&RNA_TURNER_2004, cli.celsius)
             .with_pseudoknot_params(RNA_DP03),
+        PkChoice::Turner04 => ViennaRNA::from_thermo_params(&RNA_TURNER_2004, cli.celsius)
+            .with_pseudoknot_params(RNA_DP09),
         PkChoice::Andronescu07 => {
             ViennaRNA::from_andrunescu_params(&RNA_ANDRONESCU_2007).with_pseudoknot_params(RNA_DP09)
         }

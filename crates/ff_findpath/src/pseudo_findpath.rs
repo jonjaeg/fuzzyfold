@@ -52,21 +52,22 @@ struct Expansion {
 /// Results are stored in `cache` (keyed by pair table) so that the same
 /// intermediate reached via different move orderings is only computed once.
 /// Uses [`parse_loops_from_pt`] to skip the PT → string → PT round-trip (B1).
+/// Returns `(energy, was_cache_hit)`.
 fn eval_energy(
     model: &ViennaRNA,
     seq: &[ff_energy::Base],
     pt: &PairTable,
     cache: &mut FxHashMap<PairTable, f64>,
-) -> Result<f64, String> {
+) -> Result<(f64, bool), String> {
     if let Some(&cached) = cache.get(pt) {
-        return Ok(cached);
+        return Ok((cached, true));
     }
     let loops = parse_loops_from_pt(pt);
     let energy = model.energy_of_pseudoknotted_structure(seq, &loops)
         .map(|e| e as f64 / 100.0)
         .map_err(|e: EnergyError| format!("energy: {e:?}"))?;
     cache.insert(pt.clone(), energy);
-    Ok(energy)
+    Ok((energy, false))
 }
 
 // ---------------------------------------------------------------------------
@@ -101,6 +102,7 @@ pub fn findpath_pseudo(
     target: &str,
     beam_width: usize,
     max_energy: Option<f64>,
+    cache_stats: bool,
 ) -> Result<(Vec<PathStep>, PathStats), String> {
     // ── parse inputs ─────────────────────────────────────────────────────────
     let seq_vec = NucleotideVec::try_from_rna(sequence)
@@ -140,7 +142,7 @@ pub fn findpath_pseudo(
         .unwrap_or_else(|_| ".".repeat(n));
 
     let mut cache: FxHashMap<PairTable, f64> = FxHashMap::default();
-    let start_energy = eval_energy(model, seq, &start_pt, &mut cache)?;
+    let (start_energy, _) = eval_energy(model, seq, &start_pt, &mut cache)?;
 
     // ── move set ──────────────────────────────────────────────────────────────
     // compare_structures gives deletions-first, then insertions, sorted by i.
@@ -175,11 +177,22 @@ pub fn findpath_pseudo(
     }];
 
     // ── beam search ───────────────────────────────────────────────────────────
-    for _step in 0..total_steps {
+    if cache_stats {
+        eprintln!(
+            "# {:>4}  {:>7}  {:>7}  {:>6}  {:>7}  {:>5}  {:>6}  {:>6}",
+            "step", "evals", "hits", "hit%", "unique", "surv", "errors", "pruned"
+        );
+    }
+    let mut total_evals = 0usize;
+    let mut total_hits  = 0usize;
+
+    for step in 0..total_steps {
         // B2: collect lightweight expansions first; no path/remaining_moves clones yet.
         let mut expansions: Vec<Expansion> = Vec::new();
 
-        let mut n_eval_errors = 0usize;
+        let mut n_evals          = 0usize;
+        let mut n_hits           = 0usize;
+        let mut n_eval_errors    = 0usize;
         let mut n_ceiling_pruned = 0usize;
 
         for (parent_idx, parent) in beam.iter().enumerate() {
@@ -209,10 +222,12 @@ pub fn findpath_pseudo(
                 }
 
                 // Memoized PK energy evaluation (B1: no string roundtrip).
-                let energy = match eval_energy(model, seq, &new_pt, &mut cache) {
-                    Ok(e) => e,
+                let (energy, hit) = match eval_energy(model, seq, &new_pt, &mut cache) {
+                    Ok(pair) => pair,
                     Err(_) => { n_eval_errors += 1; continue; }
                 };
+                n_evals += 1;
+                if hit { n_hits += 1; }
 
                 // Energy ceiling filter.
                 if max_energy.is_some_and(|cap| energy > cap) {
@@ -231,6 +246,9 @@ pub fn findpath_pseudo(
                 });
             }
         }
+
+        total_evals += n_evals;
+        total_hits  += n_hits;
 
         if expansions.is_empty() {
             let reason = if n_eval_errors > 0 && n_ceiling_pruned == 0 {
@@ -252,7 +270,7 @@ pub fn findpath_pseudo(
                      Try removing --max-energy or checking the target topology."
                 )
             };
-            return Err(format!("Search stuck at step {_step}: {reason}"));
+            return Err(format!("Search stuck at step {step}: {reason}"));
         }
 
         // Sort: lowest saddle first; break ties by current energy.
@@ -273,7 +291,18 @@ pub fn findpath_pseudo(
         expansions.retain(|exp| seen.insert(exp.pt.clone()));
 
         // Prune to beam width.
+        let n_unique    = expansions.len();
         expansions.truncate(beam_width);
+        let n_survivors = expansions.len();
+
+        if cache_stats {
+            let hit_pct = if n_evals > 0 { 100.0 * n_hits as f64 / n_evals as f64 } else { 0.0 };
+            eprintln!(
+                "  {:>4}  {:>7}  {:>7}  {:>5.1}%  {:>7}  {:>5}  {:>6}  {:>6}",
+                step + 1, n_evals, n_hits, hit_pct,
+                n_unique, n_survivors, n_eval_errors, n_ceiling_pruned
+            );
+        }
 
         // B2: materialize only the survivors — at most `beam_width` clones.
         // B4: swap_remove(move_idx) is O(1) vs remove(move_idx) which is O(moves).
@@ -294,6 +323,14 @@ pub fn findpath_pseudo(
     }
 
     // ── reconstruct full trajectory ───────────────────────────────────────────
+    if cache_stats {
+        let hit_pct = if total_evals > 0 { 100.0 * total_hits as f64 / total_evals as f64 } else { 0.0 };
+        eprintln!(
+            "# total: evals={total_evals} hits={total_hits} ({hit_pct:.1}%) cache_size={}",
+            cache.len()
+        );
+    }
+
     let winner = beam.into_iter().next().ok_or("No beam survivors")?;
     reconstruct_path(model, seq, n, &start_pt, &start_dot, start_energy, &winner.path, &mut cache)
 }
@@ -335,7 +372,7 @@ fn reconstruct_path(
             pt[j] = None;
         }
 
-        let en = eval_energy(model, seq, &pt, cache)?;
+        let (en, _) = eval_energy(model, seq, &pt, cache)?;
         if en > saddle { saddle = en; }
 
         let dot = pair_table_to_dot_bracket(&pt)
@@ -378,7 +415,7 @@ mod tests {
         let m = model();
         let seq = "GCGAAACGC";
         let target = ".........";
-        let (path, stats) = findpath_pseudo(&m, seq, None, target, 1, None).unwrap();
+        let (path, stats) = findpath_pseudo(&m, seq, None, target, 1, None, false).unwrap();
         assert_eq!(path.len(), 1);
         assert_eq!(stats.barrier_energy, 0.0);
     }
@@ -389,7 +426,7 @@ mod tests {
         let m = model();
         let seq = "GGGAAACCC";
         let target = "(((...)))";
-        let (path, _stats) = findpath_pseudo(&m, seq, None, target, 4, None).unwrap();
+        let (path, _stats) = findpath_pseudo(&m, seq, None, target, 4, None, false).unwrap();
 
         assert_eq!(path.last().unwrap().structure, target);
 
@@ -408,7 +445,7 @@ mod tests {
         let m = model();
         let seq    = "GCGAUUUCUGACCGCUUUUUUGUCAG";
         let target = "[[[....(((((]]]......)))))";
-        let (path, stats) = findpath_pseudo(&m, seq, None, target, 40, None).unwrap();
+        let (path, stats) = findpath_pseudo(&m, seq, None, target, 40, None, false).unwrap();
 
         // pair_table_to_dot_bracket may assign different bracket families than the input,
         // so compare pair tables rather than strings.
@@ -443,7 +480,7 @@ mod tests {
         let seq    = "GCGAUUUCUGACCGCUUUUUUGUCAG";
         let start  = ".......(((((.........)))))";
         let target = "[[[....(((((]]]......)))))";
-        let (path, stats) = findpath_pseudo(&m, seq, Some(start), target, 10, None).unwrap();
+        let (path, stats) = findpath_pseudo(&m, seq, Some(start), target, 10, None, false).unwrap();
 
         // First step must be the start structure (by pair table).
         let first_pt = extended_dot_bracket_to_pair_table(

@@ -63,7 +63,7 @@ pub fn region_tree_steps(structure: &str) -> PyResult<(Vec<i64>, Vec<TreeStep>)>
                 event: event_str,
                 merged,
                 stack:     s.stack.iter().map(|&i| (s.nodes[i].i, s.nodes[i].j)).collect(),
-                top_level: s.top_level.iter().map(|&i| (s.nodes[i].i, s.nodes[i].j)).collect(),
+                top_level: s.root_children.iter().map(|&i| (s.nodes[i].i, s.nodes[i].j)).collect(),
                 nodes:     s.nodes.iter().map(|r| (r.i, r.j)).collect(),
                 parents:   s.nodes.iter().map(|r| r.parent).collect(),
                 children:  s.nodes.iter().map(|r| r.children.clone()).collect(),
@@ -118,7 +118,7 @@ pub fn region_tree(structure: &str) -> PyResult<(Vec<i64>, Vec<RegionNode>)> {
 
     // Build postfix ordering over the arena.
     let mut postfix: Vec<usize> = Vec::with_capacity(tree.nodes.len());
-    for &tl in &tree.top_level {
+    for &tl in &tree.root_children {
         postorder_collect(&tree.nodes, tl, &mut postfix);
     }
 
@@ -143,7 +143,7 @@ pub fn region_tree(structure: &str) -> PyResult<(Vec<i64>, Vec<RegionNode>)> {
         .collect();
 
     // Append virtual root (children = top-level nodes in postfix positions).
-    let root_children: Vec<usize> = tree.top_level.iter().map(|&tl| arena_to_post[tl]).collect();
+    let root_children: Vec<usize> = tree.root_children.iter().map(|&tl| arena_to_post[tl]).collect();
     region_nodes.push(RegionNode {
         i: 0,
         j: tree.n,

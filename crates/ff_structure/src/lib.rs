@@ -1,25 +1,22 @@
-/// The crate ff_structure contains submodules error, dotbracket, pair_table, multi_pair_table, loop_table and hamming distance.
-/// and makes them globally usable.
-
-mod error;
-mod dotbracket;
-mod pair_table;
-mod multi_pair_table;
-mod loop_table;
-mod pair_set;
-mod extended_dotbracket;
+//! The crate ff_structure contains submodules error, dotbracket, pair_table, multi_pair_table, loop_table and hamming distance.
+//! and makes them globally usable.
 pub mod arc_diagram;
+mod dotbracket;
+mod error;
+mod extended_dotbracket;
+mod loop_table;
+mod multi_pair_table;
+mod pair_set;
+mod pair_table;
 
-pub use error::*;
-pub use dotbracket::*;
-pub use pair_table::*;
-pub use multi_pair_table::*;
-pub use loop_table::*;
-pub use pair_set::*;
 pub use arc_diagram::*;
+pub use dotbracket::*;
+pub use error::*;
 pub use extended_dotbracket::*;
-
-
+pub use loop_table::*;
+pub use multi_pair_table::*;
+pub use pair_set::*;
+pub use pair_table::*;
 
 /// Nucleic Acid Index: we use `u16` (0 to 65k), which is plenty for nucleic acids.
 /// Should you ever want to fold longer sequences, beware that `P1KEY` needs to
@@ -34,5 +31,3 @@ pub type P1KEY = u32;
 const _: () = {
     debug_assert!(2 * NAIDX::BITS <= P1KEY::BITS);
 };
-
-

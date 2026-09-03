@@ -70,6 +70,7 @@ fn bench_beam_width(c: &mut Criterion) {
                     black_box(case.target),
                     black_box(beam),
                     black_box(None),
+                    false,
                 )
                 .unwrap()
             })
@@ -99,6 +100,7 @@ fn bench_structure_size(c: &mut Criterion) {
                         black_box(case.target),
                         black_box(BEAM),
                         black_box(None),
+                        false,
                     )
                     .unwrap()
                 })
@@ -135,6 +137,7 @@ fn bench_start_effect(c: &mut Criterion) {
                 black_box(case.target),
                 black_box(10usize),
                 black_box(None),
+                false,
             )
             .unwrap()
         })
@@ -152,6 +155,7 @@ fn bench_start_effect(c: &mut Criterion) {
                 black_box(case.target),
                 black_box(10usize),
                 black_box(None),
+                false,
             )
             .unwrap()
         })

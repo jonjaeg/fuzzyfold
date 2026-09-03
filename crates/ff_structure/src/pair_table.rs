@@ -1,12 +1,12 @@
 //! PairTable construction and helper traits.
 
-use std::ops::{Deref, DerefMut, Index, IndexMut};
-use std::convert::TryFrom;
 use crate::NAIDX;
 use crate::StructureError;
+use crate::{BracketKind, ExtendedDotBracket};
 use crate::{DotBracket, DotBracketVec};
-use crate::{ExtendedDotBracket, BracketKind};
+use std::convert::TryFrom;
 use std::fmt;
+use std::ops::{Deref, DerefMut, Index, IndexMut};
 
 /// As of v0.1.3 the PairTable field is private. A pair-table should
 /// be constructed by From or TryFrom traits, but then be save to use.
@@ -57,7 +57,7 @@ impl Index<NAIDX> for PairTable {
     type Output = Option<NAIDX>;
 
     fn index(&self, index: NAIDX) -> &Self::Output {
-        // We cast to usize here under the hood, so we never 
+        // We cast to usize here under the hood, so we never
         // have to think about it again when using the struct.
         &self.0[index as usize]
     }
@@ -121,8 +121,9 @@ impl TryFrom<&str> for PairTable {
 
         for (i, c) in s.chars().enumerate() {
             match ExtendedDotBracket::try_from(c).map_err(|e| match e {
-                StructureError::InvalidToken(tok, src, _) =>
-                    StructureError::InvalidToken(tok, src, i),
+                StructureError::InvalidToken(tok, src, _) => {
+                    StructureError::InvalidToken(tok, src, i)
+                }
                 e => e,
             })? {
                 ExtendedDotBracket::Unpaired | ExtendedDotBracket::Break => {}
@@ -130,7 +131,9 @@ impl TryFrom<&str> for PairTable {
                     stacks.entry(kind).or_default().push(i);
                 }
                 ExtendedDotBracket::Close(kind) => {
-                    let j = stacks.entry(kind).or_default()
+                    let j = stacks
+                        .entry(kind)
+                        .or_default()
                         .pop()
                         .ok_or(StructureError::UnmatchedClose(i))?;
                     table[i] = Some(j as NAIDX);
@@ -140,10 +143,10 @@ impl TryFrom<&str> for PairTable {
         }
 
         for kind in BracketKind::all() {
-            if let Some(stack) = stacks.get(kind) {
-                if let Some(&i) = stack.first() {
-                    return Err(StructureError::UnmatchedOpen(i));
-                }
+            if let Some(stack) = stacks.get(kind)
+                && let Some(&i) = stack.first()
+            {
+                return Err(StructureError::UnmatchedOpen(i));
             }
         }
 
@@ -197,7 +200,6 @@ impl fmt::Display for PairTable {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -229,33 +231,36 @@ mod tests {
     #[test]
     fn test_invalid_token() {
         let err = PairTable::try_from("(x)").unwrap_err();
-        assert_eq!(format!("{}", err), "Invalid character 'x' in extended dot-bracket at position 1");
+        assert_eq!(
+            format!("{}", err),
+            "Invalid character 'x' in extended dot-bracket at position 1"
+        );
     }
 
     #[test]
     fn test_well_formed_empty_interval() {
-        let pt= PairTable::try_from("...").unwrap();
-        assert!(pt.is_well_formed(0, 0)); 
-        assert!(pt.is_well_formed(0, 1)); 
-        assert!(pt.is_well_formed(0, 2)); 
-        assert!(pt.is_well_formed(0, 3)); 
-        assert!(pt.is_well_formed(1, 3)); 
-        assert!(pt.is_well_formed(2, 3)); 
-        assert!(pt.is_well_formed(3, 3)); 
+        let pt = PairTable::try_from("...").unwrap();
+        assert!(pt.is_well_formed(0, 0));
+        assert!(pt.is_well_formed(0, 1));
+        assert!(pt.is_well_formed(0, 2));
+        assert!(pt.is_well_formed(0, 3));
+        assert!(pt.is_well_formed(1, 3));
+        assert!(pt.is_well_formed(2, 3));
+        assert!(pt.is_well_formed(3, 3));
     }
 
     #[test]
     fn test_well_formed_pairings_within_interval() {
         let pt = PairTable::try_from(".(.).").unwrap();
         assert!(pt.is_well_formed(0, 5)); // Full interval -- 0-based
-        assert!(pt.is_well_formed(0, 4)); 
+        assert!(pt.is_well_formed(0, 4));
         assert!(pt.is_well_formed(1, 5));
         assert!(pt.is_well_formed(1, 4));
         assert!(pt.is_well_formed(1, 4));
         assert!(pt.is_well_formed(2, 3));
-        assert!(!pt.is_well_formed(0, 3)); 
-        assert!(!pt.is_well_formed(1, 3)); 
-        assert!(!pt.is_well_formed(2, 4)); 
+        assert!(!pt.is_well_formed(0, 3));
+        assert!(!pt.is_well_formed(1, 3));
+        assert!(!pt.is_well_formed(2, 4));
     }
 
     #[test]
@@ -266,44 +271,41 @@ mod tests {
     }
 
     #[test]
-fn test_extended_brackets() {
-    // Simple pseudoknot: (( )) crossing [[ ]]
-    //                     0123456789...
-    let pt = PairTable::try_from("([)]").unwrap();
-    assert_eq!(pt[0 as NAIDX], Some(2));
-    assert_eq!(pt[1 as NAIDX], Some(3));
-    assert_eq!(pt[2 as NAIDX], Some(0));
-    assert_eq!(pt[3 as NAIDX], Some(1));
+    fn test_extended_brackets() {
+        // Simple pseudoknot: (( )) crossing [[ ]]
+        //                     0123456789...
+        let pt = PairTable::try_from("([)]").unwrap();
+        assert_eq!(pt[0 as NAIDX], Some(2));
+        assert_eq!(pt[1 as NAIDX], Some(3));
+        assert_eq!(pt[2 as NAIDX], Some(0));
+        assert_eq!(pt[3 as NAIDX], Some(1));
+    }
+
+    #[test]
+    fn test_all_bracket_types() {
+        let pt = PairTable::try_from("([{<>}])").unwrap();
+        assert_eq!(pt[0 as NAIDX], Some(7));
+        assert_eq!(pt[1 as NAIDX], Some(6));
+        assert_eq!(pt[2 as NAIDX], Some(5));
+        assert_eq!(pt[3 as NAIDX], Some(4));
+    }
+
+    #[test]
+    fn test_unmatched_open_square() {
+        let err = PairTable::try_from("[[]").unwrap_err();
+        assert_eq!(format!("{}", err), "Unmatched '(' at position 0");
+    }
+
+    #[test]
+    fn test_unmatched_close_square() {
+        let err = PairTable::try_from("[]]").unwrap_err();
+        assert_eq!(format!("{}", err), "Unmatched ')' at position 2");
+    }
+
+    #[test]
+    fn test_display_pair_table() {
+        let pt = PairTable::try_from("(.())").unwrap();
+        let display = format!("{}", pt);
+        assert_eq!(display, "[4, -, 3, 2, 0]");
+    }
 }
-
-#[test]
-fn test_all_bracket_types() {
-    let pt = PairTable::try_from("([{<>}])").unwrap();
-    assert_eq!(pt[0 as NAIDX], Some(7));
-    assert_eq!(pt[1 as NAIDX], Some(6));
-    assert_eq!(pt[2 as NAIDX], Some(5));
-    assert_eq!(pt[3 as NAIDX], Some(4));
-}
-
-#[test]
-fn test_unmatched_open_square() {
-    let err = PairTable::try_from("[[]").unwrap_err();
-    assert_eq!(format!("{}", err), "Unmatched '(' at position 0");
-}
-
-#[test]
-fn test_unmatched_close_square() {
-    let err = PairTable::try_from("[]]").unwrap_err();
-    assert_eq!(format!("{}", err), "Unmatched ')' at position 2");
-}
-
-#[test]
-fn test_display_pair_table() {
-    let pt = PairTable::try_from("(.())").unwrap();
-    let display = format!("{}", pt);
-    assert_eq!(display, "[4, -, 3, 2, 0]");
-}
-}
-
-
-

@@ -1,17 +1,16 @@
 //! Parsing of secondary structure as Extended Dot-Bracket notation to build a PairTable
 //! for susequently building the Tree of closed Regions. (closed_region_tree.rs)
 
-use std::collections::HashMap;
 use ff_structure::NAIDX;
-use ff_structure::{ExtendedDotBracket, BracketKind};
+use ff_structure::{BracketKind, ExtendedDotBracket};
 use ff_structure::{PairTable, StructureError};
+use std::collections::HashMap;
 
 /// Takes a slice of `ExtendedDotBracket` enum variants and returns the corresponding `PairTable`,
 /// or a `StructureError` if brackets are unmatched.
 pub fn extended_dot_bracket_to_pair_table(
-    edb: &[ExtendedDotBracket]
+    edb: &[ExtendedDotBracket],
 ) -> Result<PairTable, StructureError> {
-
     // create a new empty PairTable (all None values) of the same length as the input edb
     let mut pt = PairTable::new(edb.len());
 
@@ -22,12 +21,14 @@ pub fn extended_dot_bracket_to_pair_table(
     for (i, ch) in edb.iter().enumerate() {
         match ch {
             // Unpaired and break BracketKinds do not affect the stack => continue
-            ExtendedDotBracket::Unpaired  => {}
-            ExtendedDotBracket::Break => {return Err(StructureError::InvalidToken(
-                format!("character '{}'", char::from(*ch)),
-                "extended dot-bracket".to_string(),
-                i,
-            ))},
+            ExtendedDotBracket::Unpaired => {}
+            ExtendedDotBracket::Break => {
+                return Err(StructureError::InvalidToken(
+                    format!("character '{}'", char::from(*ch)),
+                    "extended dot-bracket".to_string(),
+                    i,
+                ));
+            }
 
             // For an open bracket, push the index onto the corresponding stack with the BracketKind as the key
             ExtendedDotBracket::Open(kind) => {
@@ -39,7 +40,7 @@ pub fn extended_dot_bracket_to_pair_table(
                     .get_mut(kind) // returns Option<&mut Vec<NAIDX>>
                     .and_then(|s| s.pop()) // if Option type above returns Some(stack), we pass the stack s as a mutable reference and pop from the stack, which returns Option<NAIDX>
                     .ok_or(StructureError::UnmatchedClose(i))?; // if the Option type above returns None, we return an error for unmatched close bracket at index i
-                
+
                 // build the PairTable by setting the indices i and j to point to each other
                 pt[i] = Some(j);
                 pt[j as usize] = Some(i as NAIDX);
@@ -47,23 +48,18 @@ pub fn extended_dot_bracket_to_pair_table(
         }
     }
 
-    // Check for any unclosed open brackets across all kinds after the loop. 
+    // Check for any unclosed open brackets across all kinds after the loop.
     // If any stack is not empty, it means there are unmatched open brackets, and we return an error for the first unmatched open bracket found.
     for kind in BracketKind::all() {
-        if let Some(stack) = stacks.get(kind) {
-            if let Some(&i) = stack.first() {
-                return Err(StructureError::UnmatchedOpen(i as usize));
-            }
+        if let Some(stack) = stacks.get(kind)
+            && let Some(&i) = stack.first()
+        {
+            return Err(StructureError::UnmatchedOpen(i as usize));
         }
     }
 
     Ok(pt)
 }
-
-
-
-
-
 
 #[cfg(test)]
 mod tests {
@@ -91,7 +87,7 @@ mod tests {
     }
 
     #[test]
-    fn test_invalid_edb_mismatched_brackets(){
+    fn test_invalid_edb_mismatched_brackets() {
         // Example: "(.]" => mismatched brackets
         let edb = vec![
             ExtendedDotBracket::Open(BracketKind::Round),
@@ -100,11 +96,10 @@ mod tests {
         ];
         let err = extended_dot_bracket_to_pair_table(&edb).unwrap_err();
         assert!(matches!(err, StructureError::UnmatchedClose(2)));
-
     }
 
     #[test]
-    fn test_invalid_edb_unmatched_open(){
+    fn test_invalid_edb_unmatched_open() {
         // Example: "([.)" => unmatched open bracket
         let edb = vec![
             ExtendedDotBracket::Open(BracketKind::Round),

@@ -3,8 +3,8 @@
 //! representation with no explicit root node.
 
 use ff_structure::PairTable;
-use std::fmt;
 use std::collections::{HashMap, HashSet};
+use std::fmt;
 
 /// A node in the closed-regions tree. `i` and `j` are 0-based endpoints.
 ///
@@ -20,30 +20,35 @@ pub struct ClosedRegion {
 
 impl ClosedRegion {
     fn new(i: usize, j: usize) -> Self {
-        ClosedRegion { i, j, parent: None, children: Vec::new() }
+        ClosedRegion {
+            i,
+            j,
+            parent: None,
+            children: Vec::new(),
+        }
     }
 }
 
 /// Arena of `ClosedRegion`s. There is no node for the root; `n` and
-/// `top_level` replace the Python root's `j` and `children`.
+/// `root_children` replace the Python root's `j` and `children`.
 #[derive(Debug, Clone)]
 pub struct RegionTree {
     pub nodes: Vec<ClosedRegion>,
     /// Length of the structure (the implicit root's right endpoint).
     pub n: usize,
-    /// Top-level regions, sorted by `i` (the implicit root's children).
-    pub top_level: Vec<usize>,
+    /// Direct children of the implicit root (arena indices, sorted by `i`).
+    pub root_children: Vec<usize>,
 }
 
-/// Re-parents `region_idx` as top-level, claiming any currently-pooled
+/// Re-parents `region_idx` as a root child, claiming any currently-pooled
 /// regions nested inside it (those with `i > region.i`).
 ///
 /// Mirrors `add_to_tree` from the Python reference implementation, where
-/// `root.children` acted as the pool; here `top_level` is that pool.
-fn add_to_tree(nodes: &mut [ClosedRegion], top_level: &mut Vec<usize>, region_idx: usize) {
+/// `root.children` acted as the pool; here `root_children` is that pool.
+fn add_to_tree(nodes: &mut [ClosedRegion], root_children: &mut Vec<usize>, region_idx: usize) {
     let region_i = nodes[region_idx].i;
-     
-    let pooled = std::mem::take(top_level);
+
+    let pooled = std::mem::take(root_children);
     let mut new_children = Vec::new();
     let mut remaining = Vec::new();
 
@@ -64,7 +69,7 @@ fn add_to_tree(nodes: &mut [ClosedRegion], top_level: &mut Vec<usize>, region_id
     // nodes[region_idx].parent stays None — it's top-level.
 
     remaining.push(region_idx);
-    *top_level = remaining;
+    *root_children = remaining;
 }
 
 /// Builds the tree of closed regions from a `PairTable` (Algorithm 1,
@@ -73,7 +78,7 @@ pub fn build_closed_regions_tree(pt: &PairTable) -> RegionTree {
     let n = pt.len();
 
     let mut nodes: Vec<ClosedRegion> = Vec::new();
-    let mut top_level: Vec<usize> = Vec::new();
+    let mut root_children: Vec<usize> = Vec::new();
     let mut stack: Vec<usize> = Vec::new();
 
     for lam in 0..n {
@@ -103,18 +108,20 @@ pub fn build_closed_regions_tree(pt: &PairTable) -> RegionTree {
         }
 
         // Case 3: does lam close the region on top of the stack?
-        if let Some(&top) = stack.last() {
-            if lam == nodes[top].j {
-                let region_idx = stack.pop().unwrap();
-                add_to_tree(&mut nodes, &mut top_level, region_idx);
-            }
+        if let Some(&top) = stack.last()
+            && lam == nodes[top].j
+        {
+            let region_idx = stack.pop().unwrap();
+            add_to_tree(&mut nodes, &mut root_children, region_idx);
         }
     }
 
-    RegionTree { nodes, n, top_level }
+    RegionTree {
+        nodes,
+        n,
+        root_children,
+    }
 }
-
-
 
 // Display implementations for debugging and visualization
 impl fmt::Display for ClosedRegion {
@@ -127,8 +134,8 @@ impl fmt::Display for RegionTree {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "root (n={})", self.n)?;
 
-        let last = self.top_level.len().saturating_sub(1);
-        for (idx, &child) in self.top_level.iter().enumerate() {
+        let last = self.root_children.len().saturating_sub(1);
+        for (idx, &child) in self.root_children.iter().enumerate() {
             self.fmt_node(f, child, "", idx == last)?;
         }
         Ok(())
@@ -136,7 +143,13 @@ impl fmt::Display for RegionTree {
 }
 
 impl RegionTree {
-    fn fmt_node(&self, f: &mut fmt::Formatter<'_>, idx: usize, prefix: &str, is_last: bool) -> fmt::Result {
+    fn fmt_node(
+        &self,
+        f: &mut fmt::Formatter<'_>,
+        idx: usize,
+        prefix: &str,
+        is_last: bool,
+    ) -> fmt::Result {
         let region = &self.nodes[idx];
         let connector = if is_last { "└── " } else { "├── " };
         writeln!(f, "{prefix}{connector}{region}")?;
@@ -166,8 +179,8 @@ pub struct BuildStep {
     pub event: BuildEvent,
     /// Arena indices of open regions (not yet completed).
     pub stack: Vec<usize>,
-    /// Arena indices of completed top-level regions.
-    pub top_level: Vec<usize>,
+    /// Arena indices of completed root children (same pool as `RegionTree::root_children`).
+    pub root_children: Vec<usize>,
     /// Snapshot of the full arena after this step.
     pub nodes: Vec<ClosedRegion>,
     /// Arena index of the region completed this step (Case 3), if any.
@@ -179,7 +192,7 @@ pub struct BuildStep {
 pub fn build_closed_regions_tree_steps(pt: &PairTable) -> Vec<BuildStep> {
     let n = pt.len();
     let mut nodes: Vec<ClosedRegion> = Vec::new();
-    let mut top_level: Vec<usize> = Vec::new();
+    let mut root_children: Vec<usize> = Vec::new();
     let mut stack: Vec<usize> = Vec::new();
     let mut steps: Vec<BuildStep> = Vec::new();
 
@@ -217,19 +230,19 @@ pub fn build_closed_regions_tree_steps(pt: &PairTable) -> Vec<BuildStep> {
         }
 
         // Case 3: does lam close the region on top of the stack?
-        if let Some(&top) = stack.last() {
-            if lam == nodes[top].j {
-                let region_idx = stack.pop().unwrap();
-                add_to_tree(&mut nodes, &mut top_level, region_idx);
-                completed = Some(region_idx);
-            }
+        if let Some(&top) = stack.last()
+            && lam == nodes[top].j
+        {
+            let region_idx = stack.pop().unwrap();
+            add_to_tree(&mut nodes, &mut root_children, region_idx);
+            completed = Some(region_idx);
         }
 
         steps.push(BuildStep {
             lam,
             event,
             stack: stack.clone(),
-            top_level: top_level.clone(),
+            root_children: root_children.clone(),
             nodes: nodes.clone(),
             completed,
         });
@@ -289,7 +302,6 @@ pub fn closing_descriptor(region: &ClosedRegion, pt: &PairTable) -> ClosingDescr
     }
 }
 
-
 /// Where a region sits relative to its parent's pairing structure.
 ///
 /// `SpanBand` is not produced by `location_status` — per the original
@@ -309,7 +321,11 @@ pub enum LocationStatus {
 /// `parent == None` corresponds to the Python `parent is None or
 /// parent.is_root` check — in our arena, a top-level region's `parent`
 /// field is `None` (its Python counterpart's parent was the sentinel root).
-pub fn location_status(region: &ClosedRegion, parent: Option<&ClosedRegion>, pt: &PairTable) -> LocationStatus {
+pub fn location_status(
+    region: &ClosedRegion,
+    parent: Option<&ClosedRegion>,
+    pt: &PairTable,
+) -> LocationStatus {
     let parent = match parent {
         None => return LocationStatus::Standard,
         Some(p) => p,
@@ -339,7 +355,6 @@ pub fn location_status(region: &ClosedRegion, parent: Option<&ClosedRegion>, pt:
     }
 }
 
-
 /// Builds `BL` for `region`, then walks it left-to-right using the §3.2
 /// stacking relation. Returns a list of chains; each chain is a band's
 /// left-arm positions ordered outer → inner.
@@ -353,7 +368,9 @@ pub fn collect_bands(tree: &RegionTree, region: &ClosedRegion, pt: &PairTable) -
     // ----- Step 1: construct BL --------------------------------------------
     // BL = paired positions in [region.i, region.j] that are neither inside
     // a nested closed region nor a closing pair of one.
-    let child_ranges: Vec<(usize, usize)> = region.children.iter()
+    let child_ranges: Vec<(usize, usize)> = region
+        .children
+        .iter()
         .map(|&idx| (tree.nodes[idx].i, tree.nodes[idx].j))
         .collect();
 
@@ -435,7 +452,13 @@ pub fn collect_bands(tree: &RegionTree, region: &ClosedRegion, pt: &PairTable) -
 }
 
 /// Closing pairs of children whose interval lies strictly inside `(left, right)`.
-pub fn nested_pairs(tree: &RegionTree, children: &[usize], pt: &PairTable, left: usize, right: usize) -> Vec<(usize, usize)> {
+pub fn nested_pairs(
+    tree: &RegionTree,
+    children: &[usize],
+    pt: &PairTable,
+    left: usize,
+    right: usize,
+) -> Vec<(usize, usize)> {
     let mut result = Vec::new();
     for &idx in children {
         let c = &tree.nodes[idx];
@@ -446,7 +469,6 @@ pub fn nested_pairs(tree: &RegionTree, children: &[usize], pt: &PairTable, left:
     result
 }
 
-
 #[cfg(test)]
 mod build_closed_region_tree_tests {
     use super::*;
@@ -454,14 +476,14 @@ mod build_closed_region_tree_tests {
 
     #[test]
     fn test_simple_hairpin() {
-        // (((...)))  ->  top_level=[(0,8)] -> (1,7) -> (2,6)
+        // (((...)))  ->  root_children=[(0,8)] -> (1,7) -> (2,6)
         let pt = PairTable::try_from("(((...)))").unwrap();
         let tree = build_closed_regions_tree(&pt);
 
         assert_eq!(tree.n, 9);
-        assert_eq!(tree.top_level.len(), 1);
+        assert_eq!(tree.root_children.len(), 1);
 
-        let r0 = &tree.nodes[tree.top_level[0]];
+        let r0 = &tree.nodes[tree.root_children[0]];
         assert_eq!((r0.i, r0.j), (0, 8));
         assert_eq!(r0.parent, None);
         assert_eq!(r0.children.len(), 1);
@@ -477,12 +499,12 @@ mod build_closed_region_tree_tests {
 
     #[test]
     fn test_h_type_pseudoknot_collapses_to_single_region() {
-        // ((([[[)))...]]]  ->  top_level=[(0,14)], pseudoknotted, no children
+        // ((([[[)))...]]]  ->  root_children=[(0,14)], pseudoknotted, no children
         let pt = PairTable::try_from("((([[[)))...]]]").unwrap();
         let tree = build_closed_regions_tree(&pt);
 
-        assert_eq!(tree.top_level.len(), 1);
-        let r0 = &tree.nodes[tree.top_level[0]];
+        assert_eq!(tree.root_children.len(), 1);
+        let r0 = &tree.nodes[tree.root_children[0]];
         assert_eq!((r0.i, r0.j), (0, 14));
         assert!(r0.children.is_empty());
         assert_ne!(pt[0 as usize].map(|v| v as usize), Some(r0.j)); // pseudoknotted
@@ -493,11 +515,75 @@ mod build_closed_region_tree_tests {
         let pt = PairTable::try_from("((..))((..))").unwrap();
         let tree = build_closed_regions_tree(&pt);
 
-        assert_eq!(tree.top_level.len(), 2);
-        let r0 = &tree.nodes[tree.top_level[0]];
-        let r1 = &tree.nodes[tree.top_level[1]];
+        assert_eq!(tree.root_children.len(), 2);
+        let r0 = &tree.nodes[tree.root_children[0]];
+        let r1 = &tree.nodes[tree.root_children[1]];
         assert_eq!((r0.i, r0.j), (0, 5));
         assert_eq!((r1.i, r1.j), (6, 11));
+    }
+
+    // ── add_to_tree unit tests ────────────────────────────────────────────────
+
+    // Test 1: empty pool — the new region becomes the only root child with no
+    // children of its own.
+    #[test]
+    fn test_add_to_tree_empty_pool() {
+        let mut nodes = vec![ClosedRegion::new(0, 8)]; // arena idx 0
+        let mut root_children: Vec<usize> = Vec::new();
+
+        add_to_tree(&mut nodes, &mut root_children, 0);
+
+        assert_eq!(root_children, vec![0]);
+        assert!(nodes[0].children.is_empty());
+        assert_eq!(nodes[0].parent, None);
+    }
+
+    // Test 2: pool contains a region that is nested inside the new one
+    // (its `i` > new region's `i`) — it must be claimed as a child.
+    #[test]
+    fn test_add_to_tree_claims_nested_region() {
+        // arena: idx 0 = [2,6] (inner, already finished), idx 1 = [0,8] (outer)
+        let mut nodes = vec![
+            ClosedRegion::new(2, 6), // idx 0 — inner, currently in pool
+            ClosedRegion::new(0, 8), // idx 1 — outer, being added now
+        ];
+        let mut root_children = vec![0usize]; // inner is parked as root child
+
+        add_to_tree(&mut nodes, &mut root_children, 1); // add outer
+
+        // outer becomes the only root child
+        assert_eq!(root_children, vec![1]);
+        // outer claims inner as its child
+        assert_eq!(nodes[1].children, vec![0]);
+        assert_eq!(nodes[1].parent, None);
+        // inner's parent is updated to outer
+        assert_eq!(nodes[0].parent, Some(1));
+    }
+
+    // Test 3: pool contains one sibling (i < new region's i) and one nested
+    // region (i > new region's i). Only the nested one is claimed; the sibling
+    // stays in root_children alongside the new region.
+    #[test]
+    fn test_add_to_tree_keeps_sibling_unclaimed() {
+        // arena: idx 0 = [0,5] (sibling), idx 1 = [8,12] (nested), idx 2 = [6,14] (new)
+        let mut nodes = vec![
+            ClosedRegion::new(0, 5),  // idx 0 — sibling, i=0 < 6 → stays
+            ClosedRegion::new(8, 12), // idx 1 — nested,  i=8 > 6 → claimed
+            ClosedRegion::new(6, 14), // idx 2 — being added now
+        ];
+        let mut root_children = vec![0usize, 1usize]; // both parked as root children
+
+        add_to_tree(&mut nodes, &mut root_children, 2);
+
+        // sibling (0) stays; new region (2) is appended after it
+        assert_eq!(root_children, vec![0, 2]);
+        // new region claims only the nested one
+        assert_eq!(nodes[2].children, vec![1]);
+        assert_eq!(nodes[2].parent, None);
+        assert_eq!(nodes[1].parent, Some(2));
+        // sibling is untouched
+        assert_eq!(nodes[0].parent, None);
+        assert!(nodes[0].children.is_empty());
     }
 }
 
@@ -535,7 +621,22 @@ root (n=12)
         assert_eq!(tree.to_string(), expected);
     }
 }
+#[test]
+fn test_display_turnip_yellow_rna() {
+    let pt = PairTable::try_from("(((((.......)))))(((....[[[[[)))...]]]]]....").unwrap();
+    let tree = build_closed_regions_tree(&pt);
 
+    let expected = "\
+root (n=44)
+├── ClosedRegion[0,16]
+│   └── ClosedRegion[1,15]
+│       └── ClosedRegion[2,14]
+│           └── ClosedRegion[3,13]
+│               └── ClosedRegion[4,12]
+└── ClosedRegion[17,39]
+";
+    assert_eq!(tree.to_string(), expected);
+}
 
 #[cfg(test)]
 mod closing_tests {
@@ -549,7 +650,7 @@ mod closing_tests {
         let tree = build_closed_regions_tree(&pt);
 
         // walk down to the innermost region
-        let r0 = tree.top_level[0];
+        let r0 = tree.root_children[0];
         let r1 = tree.nodes[r0].children[0];
         let r2 = tree.nodes[r1].children[0];
         let region = &tree.nodes[r2];
@@ -557,7 +658,10 @@ mod closing_tests {
         assert_eq!((region.i, region.j), (2, 6));
         assert!(!is_pseudo(region, &pt));
         assert_eq!(closing_pairs(region, &pt), vec![(2, 6)]);
-        assert_eq!(closing_descriptor(region, &pt), ClosingDescriptor::Single((2, 6)));
+        assert_eq!(
+            closing_descriptor(region, &pt),
+            ClosingDescriptor::Single((2, 6))
+        );
     }
 
     #[test]
@@ -566,7 +670,7 @@ mod closing_tests {
         let pt = PairTable::try_from("((([[[)))...]]]").unwrap();
         let tree = build_closed_regions_tree(&pt);
 
-        let r0 = tree.top_level[0];
+        let r0 = tree.root_children[0];
         let region = &tree.nodes[r0];
 
         assert_eq!((region.i, region.j), (0, 14));
@@ -579,20 +683,27 @@ mod closing_tests {
     }
 }
 
-
 #[cfg(test)]
 mod location_status_tests {
     use super::*;
 
     fn region(i: usize, j: usize, parent: Option<usize>) -> ClosedRegion {
-        ClosedRegion { i, j, parent, children: Vec::new() }
+        ClosedRegion {
+            i,
+            j,
+            parent,
+            children: Vec::new(),
+        }
     }
 
     #[test]
-    fn test_top_level_is_standard() {
+    fn test_root_children_is_standard() {
         let region = region(0, 8, None);
         let pt = PairTable::new(9);
-        assert_eq!(location_status(&region, None, &pt), LocationStatus::Standard);
+        assert_eq!(
+            location_status(&region, None, &pt),
+            LocationStatus::Standard
+        );
     }
 
     #[test]
@@ -605,7 +716,10 @@ mod location_status_tests {
         let parent = region(1, 12, None);
         let child = region(4, 9, Some(0));
 
-        assert_eq!(location_status(&child, Some(&parent), &pt), LocationStatus::Standard);
+        assert_eq!(
+            location_status(&child, Some(&parent), &pt),
+            LocationStatus::Standard
+        );
     }
 
     #[test]
@@ -621,7 +735,10 @@ mod location_status_tests {
         let parent = region(0, 10, None);
         let child = region(4, 8, Some(0)); // ri=4, inside [0,6]
 
-        assert_eq!(location_status(&child, Some(&parent), &pt), LocationStatus::InBand);
+        assert_eq!(
+            location_status(&child, Some(&parent), &pt),
+            LocationStatus::InBand
+        );
     }
 
     #[test]
@@ -636,14 +753,23 @@ mod location_status_tests {
 
         let parent = region(0, 21, None);
 
-        let in_gap = region(10, 11, Some(0));    // ri=10, in gap (9,12)
-        assert_eq!(location_status(&in_gap, Some(&parent), &pt), LocationStatus::OutBand);
+        let in_gap = region(10, 11, Some(0)); // ri=10, in gap (9,12)
+        assert_eq!(
+            location_status(&in_gap, Some(&parent), &pt),
+            LocationStatus::OutBand
+        );
 
-        let left_band = region(3, 8, Some(0));   // ri=3, within [0,9]
-        assert_eq!(location_status(&left_band, Some(&parent), &pt), LocationStatus::InBand);
+        let left_band = region(3, 8, Some(0)); // ri=3, within [0,9]
+        assert_eq!(
+            location_status(&left_band, Some(&parent), &pt),
+            LocationStatus::InBand
+        );
 
         let right_band = region(15, 18, Some(0)); // ri=15, within [12,21]
-        assert_eq!(location_status(&right_band, Some(&parent), &pt), LocationStatus::InBand);
+        assert_eq!(
+            location_status(&right_band, Some(&parent), &pt),
+            LocationStatus::InBand
+        );
     }
 }
 
@@ -657,7 +783,7 @@ mod collect_bands_tests {
         let pt = PairTable::try_from("(((...)))").unwrap();
         let tree = build_closed_regions_tree(&pt);
 
-        let region = &tree.nodes[tree.top_level[0]];
+        let region = &tree.nodes[tree.root_children[0]];
         assert!(collect_bands(&tree, region, &pt).is_empty());
     }
 
@@ -669,7 +795,7 @@ mod collect_bands_tests {
         let pt = PairTable::try_from("((([[[)))...]]]").unwrap();
         let tree = build_closed_regions_tree(&pt);
 
-        let region = &tree.nodes[tree.top_level[0]];
+        let region = &tree.nodes[tree.root_children[0]];
         assert_eq!((region.i, region.j), (0, 14));
         assert!(region.children.is_empty());
 
@@ -690,7 +816,7 @@ mod nested_pairs_tests {
         let pt = PairTable::try_from("(((..((...))...((...))...)))").unwrap();
         let tree = build_closed_regions_tree(&pt);
 
-        let r0 = tree.top_level[0];          // (0,27)
+        let r0 = tree.root_children[0]; // (0,27)
         let r1 = tree.nodes[r0].children[0]; // (1,26)
         let r2 = tree.nodes[r1].children[0]; // (2,25)
 
@@ -707,7 +833,7 @@ mod nested_pairs_tests {
         let pt = PairTable::try_from("(((..((...))...((...))...)))").unwrap();
         let tree = build_closed_regions_tree(&pt);
 
-        let r0 = tree.top_level[0];
+        let r0 = tree.root_children[0];
         let r1 = tree.nodes[r0].children[0];
         let r2 = tree.nodes[r1].children[0];
         let region = &tree.nodes[r2];
@@ -722,7 +848,7 @@ mod nested_pairs_tests {
         let pt = PairTable::try_from("(((...)))").unwrap();
         let tree = build_closed_regions_tree(&pt);
 
-        let r0 = tree.top_level[0];
+        let r0 = tree.root_children[0];
         let r1 = tree.nodes[r0].children[0];
         let r2 = tree.nodes[r1].children[0]; // (2,6), no children
 

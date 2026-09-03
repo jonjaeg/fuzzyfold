@@ -42,6 +42,10 @@ struct Args {
     /// Temperature in Celsius for nearest-neighbor stacking parameters.
     #[arg(long, value_name = "CELSIUS", default_value = "37")]
     celsius: f64,
+
+    /// Print per-step cache hit statistics to stderr.
+    #[arg(long)]
+    cache_stats: bool,
 }
 
 fn read_lines(source: &str) -> io::Result<Vec<String>> {
@@ -88,6 +92,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         target,
         args.beam_width,
         args.max_energy,
+        args.cache_stats,
     )
     .unwrap_or_else(|e| {
         eprintln!("findpath_pseudo failed: {e}");
