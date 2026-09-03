@@ -75,17 +75,17 @@ pub fn enumerate_band_spanning_loops(tree: &RegionTree, region: &ClosedRegion, p
 
 /// Builds the list of `Loop`s for a structure, given its closed-regions tree.
 /// Mirrors the Python `enumerate_loops(root, pt)`, with the `region.is_root`
-/// branch replaced by a final pass over `tree.top_level`.
+/// branch replaced by a final pass over `tree.root_children`.
 pub fn enumerate_loops(tree: &RegionTree, pt: &PairTable) -> Vec<Loop> {
     let mut loops = Vec::new();
 
-    for &idx in &tree.top_level {
+    for &idx in &tree.root_children {
         visit(tree, idx, pt, &mut loops, PseudoloopContext::External);
     }
 
     // External loop: in Python this was the `region.is_root` branch of
-    // `visit`, using `root.children`. Here `top_level` plays that role.
-    let child_bps: Vec<ClosingDescriptor> = tree.top_level.iter()
+    // `visit`, using `root.children`. Here `root_children` plays that role.
+    let child_bps: Vec<ClosingDescriptor> = tree.root_children.iter()
         .map(|&idx| closing_descriptor(&tree.nodes[idx], pt))
         .collect();
 
@@ -155,28 +155,38 @@ fn visit(tree: &RegionTree, idx: usize, pt: &PairTable, loops: &mut Vec<Loop>, p
             ClosingDescriptor::Double((i, _), _) => *i,
         });
 
-        // For H-type pseudoknots (exactly 2 bands) compute the number of
-        // unpaired bases in each gap between the two helices.
-        let (n_loop1, n_loop2) = if bands.len() == 2 {
-            let chain1 = &bands[0];
-            let chain2 = &bands[1];
-            let tip1_5p   = *chain1.last().unwrap();
-            let outer2_5p =  chain2[0];
-            let outer1_3p = pt[chain1[0]].expect("band rung must be paired") as usize;
-            let tip2_3p   = pt[*chain2.last().unwrap()].expect("band rung must be paired") as usize;
-            (
-                count_unpaired(pt, tip1_5p + 1, outer2_5p),
-                count_unpaired(pt, outer1_3p + 1, tip2_3p),
-            )
-        } else {
-            (0, 0)
-        };
+        // Compute free linker bases in the pseudoloop gaps (the `pup` term).
+        //
+        // Mirrors HotKnots' pseudoEnergyDP directly: sort all arm segments by
+        // start position, then sum the 2n−1 gaps between consecutive segments,
+        // subtracting the span of any nested child region in each gap.
+        // No special case for n=2 — the formula is the same for all densities.
+        // DP09 was trained on 2-band structures; applying it to n>2 is an
+        // extrapolation, but the counting method is correct in all cases.
+        if bands.len() > 2 {
+            eprintln!(
+                "Warning: pseudoloop with {} bands. \
+                 DP09 parameters are extrapolated beyond their 2-band training domain.",
+                bands.len()
+            );
+        }
+        let mut arm_segs: Vec<(usize, usize)> = bands.iter().flat_map(|chain| {
+            let outer    = chain[0];
+            let inner    = *chain.last().unwrap();
+            let inner_3p = pt[inner].expect("band rung must be paired") as usize;
+            let outer_3p = pt[outer].expect("band rung must be paired") as usize;
+            [(outer, inner), (inner_3p, outer_3p)]
+        }).collect();
+        arm_segs.sort_by_key(|&(s, _)| s);
+        let n_pup: usize = arm_segs.windows(2)
+            .map(|w| count_pup_linkers(tree, &region.children, pt, w[0].1 + 1, w[1].0))
+            .sum();
 
         loops.push(
             Loop::new(LoopType::Pseudoloop, loc)
                 .with_closing(ClosingDescriptor::Double(closing[0], closing[1]))
                 .with_children(child_pairs)
-                .with_loop_sizes(n_loop1, n_loop2)
+                .with_pup(n_pup)
                 .with_bands(bands.len())
                 .with_nested(n_children)
                 .with_pk_context(pk_context),
@@ -217,6 +227,42 @@ fn count_unpaired(pt: &PairTable, start: usize, end: usize) -> usize {
         return 0;
     }
     (start..end).filter(|&p| pt[p].is_none()).count()
+}
+
+/// Count free linker positions in the pseudoloop gap `[start, end)`.
+///
+/// Mirrors HotKnots' `pseudoEnergyDP`: takes the raw positional span of the
+/// gap and subtracts the full span of every nested child region that overlaps
+/// with it.  This matches the physical intent of the DP09 `pup` parameter —
+/// only genuinely single-stranded linker nucleotides between structured
+/// elements are counted, not bases that belong to a child hairpin or stem.
+fn count_pup_linkers(
+    tree: &RegionTree,
+    children: &[usize],
+    pt: &PairTable,
+    start: usize,
+    end: usize,
+) -> usize {
+    if start >= end {
+        return 0;
+    }
+    let raw = end - start;
+    let child_overlap: usize = children
+        .iter()
+        .filter_map(|&ci| {
+            let pairs = closing_pairs(&tree.nodes[ci], pt);
+            if pairs.is_empty() {
+                return None;
+            }
+            let cb = pairs.iter().map(|&(i, _)| i).min().unwrap();
+            let ce = pairs.iter().map(|&(_, j)| j).max().unwrap();
+            // Intersection of child span [cb, ce] with gap [start, end-1].
+            let lo = cb.max(start);
+            let hi = ce.min(end - 1);
+            if lo <= hi { Some(hi - lo + 1) } else { None }
+        })
+        .sum();
+    raw - child_overlap
 }
 
 /// Builds the list of `Loop`s for a structure directly from its `PairTable`,
@@ -260,7 +306,7 @@ mod band_spanning_loop_tests {
         // -> 4 stacked-pair (Stack) loops, all SPAN_BAND
         let pt = PairTable::try_from("((([[[)))...]]]").unwrap();
         let tree = build_closed_regions_tree(&pt);
-        let region = &tree.nodes[tree.top_level[0]];
+        let region = &tree.nodes[tree.root_children[0]];
 
         let mut loops = Vec::new();
         enumerate_band_spanning_loops(&tree, region, &pt, &mut loops);
@@ -347,7 +393,7 @@ mod enumerate_loops_tests {
                     ClosingDescriptor::Single((2, 6)),
                     ClosingDescriptor::Single((5, 12)),
                 ])
-                .with_loop_sizes(0, 3)
+                .with_pup(3)
                 .with_bands(2)
                 .with_nested(0)
                 .with_pk_context(PseudoloopContext::External)

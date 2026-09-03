@@ -2,62 +2,60 @@
 
 use ff_structure::NAIDX;
 
-use crate::{Base, EnergyError, EnergyModel, NearestNeighborLoop};
-use crate::pseudoknots::{
-    Loop, LoopType, ClosingDescriptor, LocationStatus,
-    PseudoEnergyModel, PseudoloopContext,
-    single_pair, double_pair,
-};
 use super::ViennaRNA;
+use crate::pseudoknots::{
+    ClosingDescriptor, LocationStatus, Loop, LoopType, PseudoEnergyModel, PseudoloopContext,
+    double_pair, single_pair,
+};
+use crate::{Base, EnergyError, EnergyModel, NearestNeighborLoop};
 
 impl PseudoEnergyModel for ViennaRNA {
-    fn energy_of_pseudo_loop(
-        &self,
-        sequence: &[Base],
-        lp: &Loop,
-    ) -> Result<i32, EnergyError> {
+    fn energy_of_pseudo_loop(&self, sequence: &[Base], lp: &Loop) -> Result<i32, EnergyError> {
         match lp.loop_type {
             // ── Step 6: SpanBand stacks / interior loops use scaled Turner energies ──
             LoopType::Stack | LoopType::Interior | LoopType::Bulge => {
                 let (i, j) = single_pair(lp.closing)?;
                 let (k, l) = lp.inner.ok_or(EnergyError::InvalidClosingPair)?;
-                let raw = self.energy_of_loop(sequence, &NearestNeighborLoop::Interior {
-                    closing: (i as NAIDX, j as NAIDX),
-                    inner:   (k as NAIDX, l as NAIDX),
-                })?;
-                if lp.location == LocationStatus::SpanBand {
-                    if let Some(pk) = &self.pk_params {
-                        let scale = if lp.loop_type == LoopType::Stack {
-                            pk.e_stp
-                        } else {
-                            pk.e_intp
-                        };
-                        return Ok((raw as f64 * scale).round() as i32);
-                    }
+                let raw = self.energy_of_loop(
+                    sequence,
+                    &NearestNeighborLoop::Interior {
+                        closing: (i as NAIDX, j as NAIDX),
+                        inner: (k as NAIDX, l as NAIDX),
+                    },
+                )?;
+                if lp.location == LocationStatus::SpanBand
+                    && let Some(pk) = &self.pk_params
+                {
+                    let scale = if lp.loop_type == LoopType::Stack {
+                        pk.e_stp
+                    } else {
+                        pk.e_intp
+                    };
+                    return Ok((raw as f64 * scale).round() as i32);
                 }
                 Ok(raw)
             }
 
             LoopType::Hairpin => {
                 let (i, j) = single_pair(lp.closing)?;
-                self.energy_of_loop(sequence, &NearestNeighborLoop::Hairpin {
-                    closing: (i as NAIDX, j as NAIDX),
-                })
+                self.energy_of_loop(
+                    sequence,
+                    &NearestNeighborLoop::Hairpin {
+                        closing: (i as NAIDX, j as NAIDX),
+                    },
+                )
             }
 
             // ── Step 5: SpanBand multiloops use ap/bp/cp instead of Turner ──
             LoopType::Multiloop => {
-                if lp.location == LocationStatus::SpanBand {
-                    if let Some(pk) = &self.pk_params {
-                        let n_branches = lp.children.len();
-                        let n_unpaired = lp.unpaired_5p + lp.unpaired_3p;
-                        return Ok(
-                            pk.ap
-                            + pk.bp * n_branches as i32
-                            + pk.cp * n_unpaired  as i32,
-                        );
-                    }
+                if lp.location == LocationStatus::SpanBand
+                    && let Some(pk) = &self.pk_params
+                {
+                    let n_branches = lp.children.len();
+                    let n_unpaired = lp.unpaired_5p + lp.unpaired_3p;
+                    return Ok(pk.ap + pk.bp * n_branches as i32 + pk.cp * n_unpaired as i32);
                 }
+
                 let (i, j) = single_pair(lp.closing)?;
                 // A pseudoknot child has a Double closing descriptor with crossing
                 // pairs (a1 < a2 < b1 < b2). We use the leftmost pair (a1, b1)
@@ -66,16 +64,21 @@ impl PseudoEnergyModel for ViennaRNA {
                 // strand of the PK) is counted as loop nucleotides — a small
                 // approximation. The PK's internal energy comes from its own
                 // LoopType::Pseudoloop entry.
-                let branches: Vec<(NAIDX, NAIDX)> = lp.children.iter()
+                let branches: Vec<(NAIDX, NAIDX)> = lp
+                    .children
+                    .iter()
                     .map(|cd| match cd {
                         ClosingDescriptor::Single(p) => (p.0 as NAIDX, p.1 as NAIDX),
                         ClosingDescriptor::Double(p1, _p2) => (p1.0 as NAIDX, p1.1 as NAIDX),
                     })
                     .collect();
-                self.energy_of_loop(sequence, &NearestNeighborLoop::Multibranch {
-                    closing: (i as NAIDX, j as NAIDX),
-                    branches,
-                })
+                self.energy_of_loop(
+                    sequence,
+                    &NearestNeighborLoop::Multibranch {
+                        closing: (i as NAIDX, j as NAIDX),
+                        branches,
+                    },
+                )
             }
 
             LoopType::External => {
@@ -102,16 +105,15 @@ impl PseudoEnergyModel for ViennaRNA {
             LoopType::Pseudoloop => {
                 let _ = double_pair(lp.closing)?; // validate descriptor
                 if let Some(pk) = &self.pk_params {
-                    // E = init(ctx) + pb×n_bands + pup×(n_loop1+n_loop2) + pps×n_nested
+                    // E = init(ctx) + pb×n_bands + pup×n_pup + pps×n_nested
                     let init = match lp.pk_context.unwrap_or(PseudoloopContext::External) {
-                        PseudoloopContext::External   => pk.init_external,
-                        PseudoloopContext::Multiloop  => pk.init_multiloop,
+                        PseudoloopContext::External => pk.init_external,
+                        PseudoloopContext::Multiloop => pk.init_multiloop,
                         PseudoloopContext::Pseudoloop => pk.init_pseudoloop,
                     };
-                    let n_unpaired = lp.n_loop1 + lp.n_loop2;
                     Ok(init
-                        + pk.pb  * lp.n_bands  as i32
-                        + pk.pup * n_unpaired  as i32
+                        + pk.pb * lp.n_bands as i32
+                        + pk.pup * lp.n_pup as i32
                         + pk.pps * lp.n_nested as i32)
                 } else {
                     // Fallback: simplified multiloop approximation.
@@ -123,12 +125,11 @@ impl PseudoEnergyModel for ViennaRNA {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{NucleotideVec, parse_structure};
     use crate::parameters::RNA_EXTENDED;
+    use crate::{NucleotideVec, parse_structure};
 
     fn model() -> ViennaRNA {
         ViennaRNA::from_thermo_params(&RNA_EXTENDED, 37.0)
@@ -142,27 +143,33 @@ mod tests {
 
         let seq = NucleotideVec::try_from_rna("GGGAAACCC").unwrap();
         let dot = "(((...)))";
-        let pt    = PairTable::try_from(dot).unwrap();
+        let pt = PairTable::try_from(dot).unwrap();
         let loops = parse_structure(dot).unwrap();
 
         let m = model();
         let e_standard = m.energy_of_structure(&seq, &pt).unwrap();
-        let e_pseudo   = m.energy_of_pseudoknotted_structure(&seq, &loops).unwrap();
-        assert_eq!(e_standard, e_pseudo,
-            "non-PK energy mismatch: standard={e_standard}, pseudo={e_pseudo}");
+        let e_pseudo = m.energy_of_pseudoknotted_structure(&seq, &loops).unwrap();
+        assert_eq!(
+            e_standard, e_pseudo,
+            "non-PK energy mismatch: standard={e_standard}, pseudo={e_pseudo}"
+        );
     }
 
     /// An H-type pseudoknot should evaluate without error.
     #[test]
     fn test_h_type_pseudoknot_runs() {
         // GGGCCCCCCAAAGGG pairs as ((([[[)))...]]]
-        let seq  = NucleotideVec::try_from_rna("GGGCCCCCCAAAGGG").unwrap();
+        let seq = NucleotideVec::try_from_rna("GGGCCCCCCAAAGGG").unwrap();
         let loops = parse_structure("((([[[)))...]]]").unwrap();
 
         let m = model();
         let result = m.energy_of_pseudoknotted_structure(&seq, &loops);
         println!("Pseudoknot energy: {:?}", result);
-        assert!(result.is_ok(), "pseudoknot energy evaluation failed: {:?}", result);
+        assert!(
+            result.is_ok(),
+            "pseudoknot energy evaluation failed: {:?}",
+            result
+        );
     }
 
     /// Smoke test: dp09 junction formula is pure arithmetic, no Turner tables needed.
@@ -171,13 +178,16 @@ mod tests {
     ///   init_ext=−138 + pb=246×2 + pup=6×(4+6) + pps=96×0 = −138+492+60 = 414
     #[test]
     fn test_dp09_junction_formula() {
-        use crate::parameters::{RNA_TURNER_2004, RNA_DP09};
+        use crate::parameters::{RNA_DP09, RNA_TURNER_2004};
 
-        let seq   = NucleotideVec::try_from_rna("GCGAUUUCUGACCGCUUUUUUGUCAG").unwrap();
+        let seq = NucleotideVec::try_from_rna("GCGAUUUCUGACCGCUUUUUUGUCAG").unwrap();
         let loops = parse_structure("[[[....(((((]]]......)))))").unwrap();
-        let m = ViennaRNA::from_thermo_params(&RNA_TURNER_2004, 37.0)
-            .with_pseudoknot_params(RNA_DP09);
-        let pk_loop = loops.iter().find(|l| l.loop_type == LoopType::Pseudoloop).unwrap();
+        let m =
+            ViennaRNA::from_thermo_params(&RNA_TURNER_2004, 37.0).with_pseudoknot_params(RNA_DP09);
+        let pk_loop = loops
+            .iter()
+            .find(|l| l.loop_type == LoopType::Pseudoloop)
+            .unwrap();
 
         assert_eq!(m.energy_of_pseudo_loop(&seq, pk_loop).unwrap(), 414);
     }
@@ -190,14 +200,50 @@ mod tests {
     /// Tolerance ±1 dcal/mol for f64→i32 rounding in stack scaling.
     #[test]
     fn test_dp09_total_energy() {
-        use crate::parameters::{RNA_MT09, RNA_DP09};
+        use crate::parameters::{RNA_DP09, RNA_MT09};
 
-        let seq   = NucleotideVec::try_from_rna("GCGAUUUCUGACCGCUUUUUUGUCAG").unwrap();
+        let seq = NucleotideVec::try_from_rna("GCGAUUUCUGACCGCUUUUUUGUCAG").unwrap();
         let loops = parse_structure("[[[....(((((]]]......)))))").unwrap();
-        let m = ViennaRNA::from_andrunescu_params(&RNA_MT09)
-            .with_pseudoknot_params(RNA_DP09);
+        let m = ViennaRNA::from_andrunescu_params(&RNA_MT09).with_pseudoknot_params(RNA_DP09);
         let e = m.energy_of_pseudoknotted_structure(&seq, &loops).unwrap();
-        assert!((e - (-511)).abs() <= 1,
-            "dp09+mt09 total energy: expected ~−511 dcal/mol, got {e}");
+        assert!(
+            (e - (-511)).abs() <= 1,
+            "dp09+mt09 total energy: expected ~−511 dcal/mol, got {e}"
+        );
+    }
+
+    #[test]
+    fn test_dp09_error() {
+        use crate::parameters::{RNA_DP09, RNA_MT09};
+
+        let seq = NucleotideVec::try_from_rna(
+            "ACCCCAAACCCCAAAGGGGAAACCCCAAAGGGGAAACCCCAAAGGGGAAACCCCAAACCCCAAAGGGGAAAGGGGAGGGGA",
+        )
+        .unwrap();
+        let loops = parse_structure(
+            ".((((...[[[[...))))...((((...]]]]...[[[[...))))...((((...[[[[...))))...]]]].]]]].",
+        )
+        .unwrap();
+        let m = ViennaRNA::from_andrunescu_params(&RNA_MT09).with_pseudoknot_params(RNA_DP09);
+        let e = m.energy_of_pseudoknotted_structure(&seq, &loops).unwrap();
+        println!("DP09-error energy: {}", e);
+        assert!(false);
+    }
+
+    #[test]
+    fn test_dp09_xr_rna() {
+        use crate::parameters::{RNA_DP09, RNA_MT09};
+
+        let seq = NucleotideVec::try_from_rna(
+            "AAGUCGGCCGUACGAAUAGUACCCAGGACAGCCUCCCUCUGUCCUGCUGGCCGUGGGAGAG",
+        )
+        .unwrap();
+        let loops =
+            parse_structure(".[[.(((((((((.....)))).((((((((.<<<<<.))))))))]]))))).>>>>>..")
+                .unwrap();
+        let m = ViennaRNA::from_andrunescu_params(&RNA_MT09).with_pseudoknot_params(RNA_DP09);
+        let e = m.energy_of_pseudoknotted_structure(&seq, &loops).unwrap();
+        println!("DP09-xrRNA energy: {}", e);
+        assert!(false);
     }
 }

@@ -66,8 +66,10 @@ pub fn interior_loop_type(closing: (usize, usize), inner: (usize, usize)) -> (Lo
 /// either a single pair or two crossing pairs.
 ///
 /// Fields specific to `Pseudoloop` loops:
-/// - `n_loop1` / `n_loop2`: unpaired bases in the two junction gaps (H-type only;
-///   0 for non-H-type pseudoknots with >2 bands).
+/// - `n_pup`: total free linker nucleotides across all inter-arm gaps (the `pup`
+///   term in D&P).  Computed as the sum of the 2n−1 raw positional gap spans minus
+///   the span of any nested child region that falls inside each gap — matching
+///   HotKnots' `pseudoEnergyDP` exactly.
 /// - `n_bands`: number of crossing helices (bands) in this pseudoloop.
 /// - `n_nested`: number of closed regions nested *inside* the pseudoloop
 ///   (distinct from the band tips listed in `children`).
@@ -81,10 +83,8 @@ pub struct Loop {
     pub children: Vec<ClosingDescriptor>,
     pub unpaired_5p: usize,
     pub unpaired_3p: usize,
-    /// Unpaired bases in gap1 (between the two 5' helix arms). H-type only.
-    pub n_loop1: usize,
-    /// Unpaired bases in gap2 (between the two 3' helix arms). H-type only.
-    pub n_loop2: usize,
+    /// Free linker nucleotides summed across all 2n−1 inter-arm gaps. Set on `Pseudoloop` loops.
+    pub n_pup: usize,
     /// Number of bands (crossing helices). Set on `Pseudoloop` loops.
     pub n_bands: usize,
     /// Number of actual nested closed regions inside the pseudoloop.
@@ -103,8 +103,7 @@ impl Loop {
             children: Vec::new(),
             unpaired_5p: 0,
             unpaired_3p: 0,
-            n_loop1: 0,
-            n_loop2: 0,
+            n_pup: 0,
             n_bands: 0,
             n_nested: 0,
             pk_context: None,
@@ -132,10 +131,9 @@ impl Loop {
         self
     }
 
-    /// Set the H-type pseudoknot gap sizes.
-    pub fn with_loop_sizes(mut self, n_loop1: usize, n_loop2: usize) -> Self {
-        self.n_loop1 = n_loop1;
-        self.n_loop2 = n_loop2;
+    /// Set the total free linker nucleotide count for a pseudoloop.
+    pub fn with_pup(mut self, n: usize) -> Self {
+        self.n_pup = n;
         self
     }
 
@@ -193,7 +191,7 @@ impl fmt::Display for Loop {
             parts.push(format!("unpaired=({}, {})", self.unpaired_5p, self.unpaired_3p));
         }
         if self.loop_type == LoopType::Pseudoloop {
-            parts.push(format!("loops=({}, {})", self.n_loop1, self.n_loop2));
+            parts.push(format!("pup={}", self.n_pup));
             parts.push(format!("bands={}", self.n_bands));
         }
 
@@ -246,7 +244,7 @@ mod interior_loop_tests {
         let pt = PairTable::try_from("((..((..))..))").unwrap();
         let tree = build_closed_regions_tree(&pt);
 
-        let r0 = tree.top_level[0];          // (0,13)
+        let r0 = tree.root_children[0];          // (0,13)
         let r1 = tree.nodes[r0].children[0]; // (1,12)
         let r2 = tree.nodes[r1].children[0]; // (4,9)
 
