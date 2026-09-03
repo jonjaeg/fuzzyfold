@@ -2,3 +2,5 @@
 /bash_benchmarking
 /data
 .DS_Store
+.claude
+.vscode
